@@ -21,6 +21,9 @@
                 <div class="logo">Student Analysis Hub</div>
             </div>
             <div class="header-actions">
+                <label class="semester-switcher">
+                    <select id="semesterSelectModule" class="semester-select" aria-label="Select semester"></select>
+                </label>
                 <button class="ghost-btn theme-toggle" id="themeToggleApp" type="button" aria-label="Toggle theme">Dark Mode</button>
                 <button class="ghost-btn" id="refreshDashboardBtn" type="button">Refresh Data</button>
                 <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
@@ -34,6 +37,7 @@
                     <div>
                         <p class="eyebrow">Module</p>
                         <h2 id="moduleTitle">Overview</h2>
+                        <p id="moduleSemesterLabel" class="module-semester-note">Showing results for --</p>
                     </div>
                 </div>
                 <div id="feedback" class="feedback hidden" role="status" aria-live="polite"></div>

@@ -53,6 +53,9 @@
                 <div class="logo">Student Analysis Hub</div>
             </div>
             <div class="header-actions">
+                <label class="semester-switcher">
+                    <select id="semesterSelectHome" class="semester-select" aria-label="Select semester"></select>
+                </label>
                 <button class="ghost-btn theme-toggle" id="themeToggleApp" type="button" aria-label="Toggle theme">Dark Mode</button>
                 <button class="ghost-btn" id="refreshDashboardBtn" type="button">Refresh Data</button>
                 <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
@@ -64,17 +67,18 @@
                 <div>
                     <p class="eyebrow">Academic Snapshot</p>
                     <h1>Track performance, attendance, and class trends from one place.</h1>
+                    <p id="activeSemesterLabel" class="hero-semester">Showing results for --</p>
                     <p class="hero-copy">
-                        The portal combines secure login, animated dashboards, and document import so faculty can move from files to insights much faster.
+                        The portal now supports semester-wise result tracking so teachers can focus on exactly the term they want to review.
                     </p>
                 </div>
                 <div class="hero-metrics">
                     <div class="metric-card slide-card">
-                        <span>Total Students</span>
+                        <span>Students In Semester</span>
                         <strong id="totalStudents">--</strong>
                     </div>
                     <div class="metric-card slide-card">
-                        <span>Average Marks</span>
+                        <span>Average Total Percentage</span>
                         <strong id="averageMarks">--%</strong>
                     </div>
                     <div class="metric-card slide-card">
@@ -92,34 +96,28 @@
                 <button class="card card-teal slide-card" data-module="visuals" type="button">
                     <p>ANALYTICS</p>
                     <h2>Visual Dashboard</h2>
-                    <span>Animated charts for marks, grades, and attendance bands.</span>
+                    <span>Animated charts for total percentage, grades, and attendance bands.</span>
                 </button>
                 <button class="card card-navy slide-card" data-module="ranks" type="button">
                     <p>MERIT LIST</p>
                     <h2>Rankings</h2>
-                    <span>Sorted results with attendance and score context.</span>
+                    <span>Sorted semester results by total percentage and attendance.</span>
                 </button>
-                <button class="card card-pink slide-card" data-module="average" type="button">
+                <button class="card card-pink slide-card" data-module="subjects" type="button">
+                    <p>SUBJECT VIEW</p>
+                    <h2>Subject Wise Marks</h2>
+                    <span>Inspect subject-by-subject marks for each student in the semester.</span>
+                </button>
+                <button class="card card-violet slide-card" data-module="average" type="button">
                     <p>CLASS HEALTH</p>
                     <h2>Statistics</h2>
-                    <span>See averages, support needs, and performance spread.</span>
+                    <span>See total percentage, subject averages, and performance spread.</span>
                 </button>
                 <button class="card card-gold slide-card" data-module="add" type="button">
                     <p>DATABASE</p>
                     <h2>Add or Import</h2>
-                    <span>Add one student or import Excel, PDF, and Word files.</span>
+                    <span>Add one semester result or import subject-wise result files.</span>
                 </button>
-            </section>
-
-            <section class="top-score-panel slide-card" aria-live="polite">
-                <div>
-                    <p class="eyebrow">Highest Score In Class</p>
-                    <h2 id="classHighScoreName">Loading...</h2>
-                </div>
-                <div class="top-score-value">
-                    <span>Marks</span>
-                    <strong id="classHighScoreMarks">--%</strong>
-                </div>
             </section>
 
             <section id="moduleView" class="module-view hidden">
