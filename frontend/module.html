@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module View | Teacher Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body data-theme="light" data-page="module">
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <div id="appShell" class="page-shell">
+        <header class="main-header slide-down">
+            <div>
+                <p class="eyebrow">Teacher Portal</p>
+                <div class="logo">Student Analysis Hub</div>
+            </div>
+            <div class="header-actions">
+                <label class="semester-switcher">
+                    <select id="semesterSelectModule" class="semester-select" aria-label="Select semester"></select>
+                </label>
+                <button class="ghost-btn theme-toggle" id="themeToggleApp" type="button" aria-label="Toggle theme">Dark Mode</button>
+                <button class="ghost-btn" id="refreshDashboardBtn" type="button">Refresh Data</button>
+                <button class="ghost-btn" id="logoutBtn" type="button">Logout</button>
+            </div>
+        </header>
+
+        <main class="container">
+            <section id="moduleView" class="module-view module-page-shell">
+                <div class="module-nav">
+                    <button class="back-link" id="backButton" type="button">Back to Dashboard</button>
+                    <div>
+                        <p class="eyebrow">Module</p>
+                        <h2 id="moduleTitle">Overview</h2>
+                        <p id="moduleSemesterLabel" class="module-semester-note">Showing results for --</p>
+                    </div>
+                </div>
+                <div id="feedback" class="feedback hidden" role="status" aria-live="polite"></div>
+                <div id="moduleContent"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
