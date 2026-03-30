@@ -1,19 +1,18 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
-const fsp = require('fs/promises');
-const csv = require('csv-parser');
+const { MongoClient } = require('mongodb');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
-const CSV_PATH = process.env.CSV_PATH || path.join(__dirname, 'data.csv');
-const CSV_HEADERS = ['ID', 'Name', 'Marks', 'Attendance'];
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017';
+const DB_NAME = process.env.MONGODB_DB || 'tbp';
+const STUDENTS_COLLECTION = process.env.MONGODB_COLLECTION || 'students';
 const upload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 },
@@ -23,6 +22,9 @@ const LOGIN_CREDENTIALS = {
     username: process.env.TBP_USERNAME || 'admin',
     password: process.env.TBP_PASSWORD || 'tbp123',
 };
+
+const client = new MongoClient(MONGODB_URI);
+let studentsCollection;
 
 app.use(cors());
 app.use(express.json());
@@ -37,9 +39,21 @@ function normalizeStudent(record) {
     };
 }
 
-function escapeCsvValue(value) {
-    const stringValue = String(value ?? '');
-    return `"${stringValue.replace(/"/g, '""')}"`;
+function buildStorageStudent(student) {
+    return {
+        ...student,
+        IDKey: student.ID.toLowerCase(),
+        updatedAt: new Date(),
+    };
+}
+
+function sanitizeStudentDocument(document) {
+    return {
+        ID: document.ID,
+        Name: document.Name,
+        Marks: document.Marks,
+        Attendance: document.Attendance,
+    };
 }
 
 function validateStudent(input) {
@@ -64,19 +78,13 @@ function validateStudent(input) {
     return { ok: true, student };
 }
 
-function readStudents() {
-    return new Promise((resolve, reject) => {
-        const students = [];
+async function readStudents() {
+    const students = await studentsCollection
+        .find({}, { projection: { _id: 0, IDKey: 0, updatedAt: 0 } })
+        .sort({ Name: 1, ID: 1 })
+        .toArray();
 
-        fs.createReadStream(CSV_PATH)
-            .on('error', reject)
-            .pipe(csv())
-            .on('data', (row) => {
-                students.push(normalizeStudent(row));
-            })
-            .on('end', () => resolve(students))
-            .on('error', reject);
-    });
+    return students.map(sanitizeStudentDocument);
 }
 
 function buildStats(students) {
@@ -123,15 +131,6 @@ function buildStats(students) {
         topPerformer,
         gradeCounts: totals.gradeCounts,
     };
-}
-
-async function appendStudents(students) {
-    if (!students.length) {
-        return;
-    }
-
-    const lines = students.map((student) => CSV_HEADERS.map((header) => escapeCsvValue(student[header])).join(','));
-    await fsp.appendFile(CSV_PATH, `\n${lines.join('\n')}`, 'utf8');
 }
 
 function findColumn(row, aliases) {
@@ -217,11 +216,10 @@ async function parseUploadedFile(file) {
 }
 
 async function persistStudents(candidateStudents) {
-    const existingStudents = await readStudents();
-    const existingIds = new Set(existingStudents.map((student) => student.ID.toLowerCase()));
     const seenIds = new Set();
     const acceptedStudents = [];
     const rejected = [];
+    const validatedStudents = [];
 
     for (const candidate of candidateStudents) {
         const validation = validateStudent(candidate);
@@ -235,8 +233,7 @@ async function persistStudents(candidateStudents) {
         }
 
         const normalizedId = validation.student.ID.toLowerCase();
-
-        if (existingIds.has(normalizedId) || seenIds.has(normalizedId)) {
+        if (seenIds.has(normalizedId)) {
             rejected.push({
                 record: candidate,
                 reason: 'Duplicate student ID.',
@@ -245,10 +242,41 @@ async function persistStudents(candidateStudents) {
         }
 
         seenIds.add(normalizedId);
-        acceptedStudents.push(validation.student);
+        validatedStudents.push(validation.student);
     }
 
-    await appendStudents(acceptedStudents);
+    if (!validatedStudents.length) {
+        return { added: acceptedStudents, rejected };
+    }
+
+    const existingStudents = await studentsCollection
+        .find(
+            { IDKey: { $in: validatedStudents.map((student) => student.ID.toLowerCase()) } },
+            { projection: { IDKey: 1 } }
+        )
+        .toArray();
+
+    const existingIds = new Set(existingStudents.map((student) => student.IDKey));
+    const documentsToInsert = [];
+
+    for (const student of validatedStudents) {
+        const idKey = student.ID.toLowerCase();
+
+        if (existingIds.has(idKey)) {
+            rejected.push({
+                record: student,
+                reason: 'Duplicate student ID.',
+            });
+            continue;
+        }
+
+        acceptedStudents.push(student);
+        documentsToInsert.push(buildStorageStudent(student));
+    }
+
+    if (documentsToInsert.length) {
+        await studentsCollection.insertMany(documentsToInsert, { ordered: true });
+    }
 
     return {
         added: acceptedStudents,
@@ -257,7 +285,12 @@ async function persistStudents(candidateStudents) {
 }
 
 app.get('/api/health', (req, res) => {
-    res.json({ ok: true, timestamp: new Date().toISOString() });
+    res.json({
+        ok: true,
+        timestamp: new Date().toISOString(),
+        database: DB_NAME,
+        collection: STUDENTS_COLLECTION,
+    });
 });
 
 app.post('/api/login', (req, res) => {
@@ -367,6 +400,48 @@ app.use((error, req, res, next) => {
     });
 });
 
-app.listen(PORT, () => {
-    console.log(`Server: http://localhost:${PORT}`);
+async function startServer() {
+    await client.connect();
+    const database = client.db(DB_NAME);
+    studentsCollection = database.collection(STUDENTS_COLLECTION);
+
+    await studentsCollection.updateMany(
+        {
+            ID: { $type: 'string' },
+            $or: [
+                { IDKey: { $exists: false } },
+                { IDKey: null },
+                { IDKey: '' },
+            ],
+        },
+        [
+            {
+                $set: {
+                    IDKey: { $toLower: '$ID' },
+                    updatedAt: '$$NOW',
+                },
+            },
+        ]
+    );
+
+    await studentsCollection.createIndex(
+        { IDKey: 1 },
+        {
+            unique: true,
+            partialFilterExpression: {
+                IDKey: { $type: 'string' },
+            },
+        }
+    );
+
+    app.listen(PORT, () => {
+        console.log(`Server: http://localhost:${PORT}`);
+        console.log(`MongoDB: ${MONGODB_URI}/${DB_NAME}.${STUDENTS_COLLECTION}`);
+    });
+}
+
+startServer().catch((error) => {
+    console.error('Failed to start server.');
+    console.error(error);
+    process.exit(1);
 });

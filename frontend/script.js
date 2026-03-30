@@ -6,6 +6,25 @@ const state = {
     theme: localStorage.getItem('tbp-theme') || 'light',
 };
 
+const moduleConfig = {
+    visuals: {
+        title: 'Visual Dashboard',
+        path: 'module.html?module=visuals',
+    },
+    ranks: {
+        title: 'Rankings',
+        path: 'module.html?module=ranks',
+    },
+    average: {
+        title: 'Class Statistics',
+        path: 'module.html?module=average',
+    },
+    add: {
+        title: 'Add or Import Student Data',
+        path: 'module.html?module=add',
+    },
+};
+
 const chartAnimation = {
     duration: 1200,
     easing: 'easeOutQuart',
@@ -198,12 +217,39 @@ function updateDashboardStats() {
         return;
     }
 
-    document.getElementById('totalStudents').textContent = state.stats.totalStudents;
-    document.getElementById('averageMarks').textContent = `${state.stats.averageMarks}%`;
-    document.getElementById('averageAttendance').textContent = `${state.stats.averageAttendance}%`;
-    document.getElementById('topPerformer').textContent = state.stats.topPerformer
-        ? `${state.stats.topPerformer.Name} (${state.stats.topPerformer.Marks}%)`
-        : 'No data';
+    const totalStudents = document.getElementById('totalStudents');
+    const averageMarks = document.getElementById('averageMarks');
+    const averageAttendance = document.getElementById('averageAttendance');
+    const topPerformer = document.getElementById('topPerformer');
+
+    if (totalStudents) {
+        totalStudents.textContent = state.stats.totalStudents;
+    }
+
+    if (averageMarks) {
+        averageMarks.textContent = `${state.stats.averageMarks}%`;
+    }
+
+    if (averageAttendance) {
+        averageAttendance.textContent = `${state.stats.averageAttendance}%`;
+    }
+
+    if (topPerformer) {
+        topPerformer.textContent = state.stats.topPerformer
+            ? `${state.stats.topPerformer.Name} (${state.stats.topPerformer.Marks}%)`
+            : 'No data';
+    }
+
+    const classHighScoreName = document.getElementById('classHighScoreName');
+    const classHighScoreMarks = document.getElementById('classHighScoreMarks');
+    if (classHighScoreName && classHighScoreMarks) {
+        classHighScoreName.textContent = state.stats.topPerformer
+            ? state.stats.topPerformer.Name
+            : 'No data available';
+        classHighScoreMarks.textContent = state.stats.topPerformer
+            ? `${state.stats.topPerformer.Marks}%`
+            : '--%';
+    }
 }
 
 function updateThemeButtons() {
@@ -333,24 +379,24 @@ function renderCharts() {
 }
 
 function showModule(type) {
+    const module = moduleConfig[type];
+    if (!module) {
+        return;
+    }
+
+    if (document.body.dataset.page !== 'module') {
+        window.location.href = module.path;
+        return;
+    }
+
     const title = document.getElementById('moduleTitle');
     const content = document.getElementById('moduleContent');
+    const moduleView = document.getElementById('moduleView');
 
-    document.getElementById('homeGrid').classList.add('hidden');
-    document.getElementById('moduleView').classList.remove('hidden');
-    document.getElementById('moduleView').classList.remove('module-exit');
-    document.getElementById('moduleView').classList.add('module-enter');
+    moduleView.classList.remove('hidden', 'module-exit');
+    moduleView.classList.add('module-enter');
     setFeedback('');
-
-    if (type === 'visuals') {
-        title.textContent = 'Visual Dashboard';
-    } else if (type === 'ranks') {
-        title.textContent = 'Rankings';
-    } else if (type === 'average') {
-        title.textContent = 'Class Statistics';
-    } else {
-        title.textContent = 'Add or Import Student Data';
-    }
+    title.textContent = module.title;
 
     content.innerHTML = moduleTemplates[type]();
     applyMotion(content);
@@ -366,6 +412,11 @@ function showModule(type) {
 }
 
 function showHome() {
+    if (document.body.dataset.page === 'module') {
+        window.location.href = 'index.html';
+        return;
+    }
+
     destroyCharts();
     setFeedback('');
     const moduleView = document.getElementById('moduleView');
@@ -387,6 +438,11 @@ async function refreshData(showMessage = false) {
         state.students = students;
         state.stats = stats;
         updateDashboardStats();
+
+        if (document.body.dataset.page === 'module') {
+            const currentModule = new URLSearchParams(window.location.search).get('module') || 'visuals';
+            showModule(currentModule);
+        }
 
         if (showMessage) {
             setFeedback('Dashboard data refreshed successfully.', 'success');
@@ -469,29 +525,71 @@ function logout() {
     sessionStorage.removeItem('tbp-auth');
     state.isLoggedIn = false;
     destroyCharts();
+    setFeedback('');
+
+    if (document.body.dataset.page === 'module') {
+        window.location.href = 'index.html';
+        return;
+    }
+
     document.getElementById('appShell').classList.add('hidden');
     document.getElementById('moduleView').classList.add('hidden');
     document.getElementById('homeGrid').classList.remove('hidden');
     document.getElementById('loginScreen').classList.remove('hidden');
-    setFeedback('');
     setLoginFeedback('');
 }
 
 async function bootApp() {
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('appShell').classList.remove('hidden');
+    if (document.body.dataset.page === 'module' && !state.isLoggedIn) {
+        window.location.href = 'index.html';
+        return;
+    }
+
+    const loginScreen = document.getElementById('loginScreen');
+    if (loginScreen) {
+        loginScreen.classList.add('hidden');
+    }
+
+    const appShell = document.getElementById('appShell');
+    if (appShell) {
+        appShell.classList.remove('hidden');
+    }
+
     applyMotion(document);
     await refreshData();
 }
 
-document.getElementById('loginForm').addEventListener('submit', handleLogin);
-document.getElementById('backButton').addEventListener('click', showHome);
-document.getElementById('logoutBtn').addEventListener('click', logout);
-document.getElementById('refreshDashboardBtn').addEventListener('click', async () => {
-    await refreshData(true);
-});
-document.getElementById('themeToggleLogin').addEventListener('click', toggleTheme);
-document.getElementById('themeToggleApp').addEventListener('click', toggleTheme);
+const loginForm = document.getElementById('loginForm');
+if (loginForm) {
+    loginForm.addEventListener('submit', handleLogin);
+}
+
+const backButton = document.getElementById('backButton');
+if (backButton) {
+    backButton.addEventListener('click', showHome);
+}
+
+const logoutBtn = document.getElementById('logoutBtn');
+if (logoutBtn) {
+    logoutBtn.addEventListener('click', logout);
+}
+
+const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
+if (refreshDashboardBtn) {
+    refreshDashboardBtn.addEventListener('click', async () => {
+        await refreshData(true);
+    });
+}
+
+const themeToggleLogin = document.getElementById('themeToggleLogin');
+if (themeToggleLogin) {
+    themeToggleLogin.addEventListener('click', toggleTheme);
+}
+
+const themeToggleApp = document.getElementById('themeToggleApp');
+if (themeToggleApp) {
+    themeToggleApp.addEventListener('click', toggleTheme);
+}
 
 document.querySelectorAll('[data-module]').forEach((button) => {
     button.addEventListener('click', () => showModule(button.dataset.module));
