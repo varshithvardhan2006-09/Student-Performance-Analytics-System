@@ -131,9 +131,17 @@ let reportsCol;
 let mongoClient;
 let databaseReadyPromise = null;
 
+function isLocalMongoUri(uri) {
+  return /mongodb:\/\/(127\.0\.0\.1|localhost)/i.test(String(uri || ''));
+}
+
 async function initializeDatabase() {
   if (mongoClient && db && usersCol && subjectsCol && uploadsCol && studentsCol && analyticsCol && aiInsightsCol && reportsCol) {
     return db;
+  }
+
+  if ((process.env.VERCEL || process.env.NODE_ENV === 'production') && isLocalMongoUri(MONGODB_URI)) {
+    throw new Error('Vercel cannot connect to mongodb://127.0.0.1:27017. Use a cloud MongoDB URI such as MongoDB Atlas in the Vercel environment variables.');
   }
 
   console.log('[STARTUP] Connecting to MongoDB...');
