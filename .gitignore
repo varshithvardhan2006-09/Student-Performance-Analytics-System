@@ -1,5 +1,7 @@
 backend/node_modules/
 node_modules/
+.env
+backend/.env
 *.log
 Thumbs.db
 .DS_Store

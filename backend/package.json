@@ -1,24 +1,28 @@
 {
-  "name": "backend",
-  "version": "1.0.0",
-  "description": "",
+  "name": "student-performance-analytics-backend",
+  "version": "2.0.0",
+  "description": "Student Performance Analytics System - Backend API Server",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "test": "node -e \"const path=require('path');const {execFileSync}=require('child_process');const base=path.dirname(process.env.npm_package_json);execFileSync(process.execPath,['--check',path.join(base,'index.js')],{stdio:'inherit'});execFileSync(process.execPath,['--check',path.join(base,'..','frontend','script.js')],{stdio:'inherit'});\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.6",
+    "csv-parser": "^3.0.0",
     "express": "^5.2.1",
-    "mammoth": "^1.12.0",
+    "groq-sdk": "^0.8.0",
+    "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.21.0",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.15.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

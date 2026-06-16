@@ -1,1148 +1,2251 @@
+const STORAGE_KEYS = {
+  token: 'saps-token',
+  user: 'saps-user',
+  rememberEmail: 'saps-remember-email',
+  currentUploadId: 'saps-current-upload-id',
+};
+
+const PAGE_META = {
+  upload: {
+    title: 'Welcome, Teacher!',
+    subtitle: 'Upload subject marks and get AI-powered insights.',
+  },
+  dashboard: {
+    title: 'Analytics Dashboard',
+    subtitle: 'Here is the performance analytics for the uploaded subject.',
+  },
+  insights: {
+    title: 'AI Insights & Reports',
+    subtitle: 'Generate AI insights and comprehensive reports for your data.',
+  },
+  history: {
+    title: 'Upload History',
+    subtitle: 'Review every uploaded subject analysis.',
+  },
+  profile: {
+    title: 'Profile',
+    subtitle: 'View your account details and activity.',
+  },
+  processing: {
+    title: 'File Validation & Processing',
+    subtitle: 'Please wait while we validate and process your uploaded file.',
+  },
+};
+
 const state = {
-    students: [],
-    stats: null,
-    charts: [],
-    semesters: [],
-    subjectsBySemester: {},
-    selectedSemester: localStorage.getItem('tbp-semester') || '',
-    isLoggedIn: sessionStorage.getItem('tbp-auth') === 'true',
-    theme: localStorage.getItem('tbp-theme') || 'light',
+  token: sessionStorage.getItem(STORAGE_KEYS.token) || '',
+  user: JSON.parse(sessionStorage.getItem(STORAGE_KEYS.user) || 'null'),
+  rememberEmail: localStorage.getItem(STORAGE_KEYS.rememberEmail) || '',
+  authMode: 'login',
+  view: 'upload',
+  sidebarOpen: false,
+  currentUploadId: sessionStorage.getItem(STORAGE_KEYS.currentUploadId) || '',
+  currentUpload: null,
+  analytics: null,
+  students: [],
+  history: [],
+  profile: null,
+  profileStats: null,
+  insights: null,
+  queryReply: '',
+  filters: {
+    search: '',
+    status: 'all',
+    category: 'all',
+    range: 'all',
+  },
+  processing: {
+    active: false,
+    progress: 0,
+    step: 0,
+    message: 'Preparing upload...',
+    fileName: '',
+    fileSize: 0,
+    timer: null,
+  },
+  charts: [],
 };
 
-const moduleConfig = {
-    visuals: {
-        title: 'Visual Dashboard',
-        path: 'module.html?module=visuals',
-    },
-    ranks: {
-        title: 'Rankings',
-        path: 'module.html?module=ranks',
-    },
-    subjects: {
-        title: 'Subject Wise Marks',
-        path: 'module.html?module=subjects',
-    },
-    average: {
-        title: 'Class Statistics',
-        path: 'module.html?module=average',
-    },
-    add: {
-        title: 'Add or Import Student Data',
-        path: 'module.html?module=add',
-    },
-};
-
-const chartAnimation = {
-    duration: 1200,
-    easing: 'easeOutQuart',
-};
-
-const STUDENTS_PER_PAGE = 8;
+const pageHost = document.getElementById('pageHost');
+const authScreen = document.getElementById('authScreen');
+const appShell = document.getElementById('appShell');
+const sidebar = document.getElementById('sidebar');
+const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+const topbarTitle = document.getElementById('topbarTitle');
+const topbarSubtitle = document.getElementById('topbarSubtitle');
+const teacherInitial = document.getElementById('teacherInitial');
+const teacherName = document.getElementById('teacherName');
 
 function escapeHtml(value) {
-    return String(value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-function getSelectedSemester() {
-    return state.selectedSemester || state.semesters[0] || 'Semester 1';
+function formatDate(value, options = {}) {
+  if (!value) {
+    return '--';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '--';
+  }
+
+  return date.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    ...options,
+  });
 }
 
-function getSubjects(semester = getSelectedSemester()) {
-    const subjects = state.subjectsBySemester?.[semester];
-    if (Array.isArray(subjects) && subjects.length) {
-        return subjects;
+function formatDateOnly(value) {
+  if (!value) {
+    return '--';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '--';
+  }
+
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatPercent(value, digits = 2) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '--';
+  }
+
+  return `${number.toFixed(digits)}%`;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatErrorDetails(details) {
+  if (!Array.isArray(details) || details.length === 0) {
+    return [];
+  }
+
+  return details
+    .map((item) => {
+      if (typeof item === 'string') {
+        return item;
+      }
+      if (item && typeof item === 'object') {
+        return item.message || item.reason || JSON.stringify(item);
+      }
+      return String(item);
+    })
+    .filter(Boolean);
+}
+
+function getAuthHeaders(extra = {}) {
+  return {
+    ...extra,
+    Authorization: `Bearer ${state.token}`,
+  };
+}
+
+async function requestJson(pathname, options = {}) {
+  const {
+    body,
+    headers = {},
+    method = 'GET',
+  } = options;
+
+  const fetchOptions = {
+    method,
+    headers: getAuthHeaders(headers),
+  };
+
+  if (body instanceof FormData) {
+    fetchOptions.body = body;
+    delete fetchOptions.headers['Content-Type'];
+  } else if (body !== undefined) {
+    fetchOptions.body = JSON.stringify(body);
+    fetchOptions.headers['Content-Type'] = 'application/json';
+  }
+
+  const response = await fetch(pathname, fetchOptions);
+  const text = await response.text();
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!response.ok) {
+    const message = data?.message || data?.error || text || `Request failed with status ${response.status}`;
+    const error = new Error(message);
+    error.details = data?.errors || data?.details || data || null;
+    error.status = response.status;
+    throw error;
+  }
+
+  return data;
+}
+
+async function requestBlob(pathname, filename) {
+  const response = await fetch(pathname, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const text = await response.text();
+      const parsed = text ? JSON.parse(text) : null;
+      message = parsed?.message || parsed?.error || text || message;
+    } catch {
+      // ignore
     }
+    throw new Error(message);
+  }
 
-    return state.subjectsBySemester?.['Semester 1'] || [];
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
-function renderSemesterOptions(selected = getSelectedSemester()) {
-    return state.semesters.map((semester) => `
-        <option value="${escapeHtml(semester)}" ${semester === selected ? 'selected' : ''}>${escapeHtml(semester)}</option>
-    `).join('');
+function setAuthFeedback(message, type = 'info', mode = 'login') {
+  const element = document.getElementById(mode === 'signup' ? 'signupFeedback' : 'loginFeedback');
+  if (!element) {
+    return;
+  }
+
+  element.textContent = message;
+  element.className = `inline-feedback ${type}`;
+  element.classList.remove('hidden');
 }
 
-function renderSubjectInputs(student = {}, semester = getSelectedSemester()) {
-    return getSubjects(semester).map((subject) => `
-        <label>
-            <span>${escapeHtml(subject)}</span>
-            <input name="subject_${escapeHtml(subject)}" type="number" min="0" max="100" placeholder="0-100" value="${student.Subjects?.[subject] ?? ''}">
-        </label>
-    `).join('');
+function hideAuthFeedback(mode = 'login') {
+  const element = document.getElementById(mode === 'signup' ? 'signupFeedback' : 'loginFeedback');
+  if (!element) {
+    return;
+  }
+
+  element.textContent = '';
+  element.className = 'inline-feedback hidden';
 }
 
-function renderSubjectChips(subjects = {}) {
-    const entries = Object.entries(subjects || {}).filter(([, marks]) => Number.isFinite(Number(marks)));
-    if (!entries.length) {
-        return '<span class="subject-chip muted-chip">Overall percentage only</span>';
-    }
+function setAuthMode(mode) {
+  state.authMode = mode === 'signup' ? 'signup' : 'login';
 
-    return entries.map(([subject, marks]) => `
-        <span class="subject-chip">${escapeHtml(subject)} ${Number(marks)}%</span>
-    `).join('');
+  const loginForm = document.getElementById('loginForm');
+  const signupForm = document.getElementById('signupForm');
+  const authTitle = document.querySelector('[data-auth-title]');
+  const authCopy = document.querySelector('[data-auth-copy]');
+  const authCard = document.querySelector('.auth-card');
+
+  if (loginForm) {
+    loginForm.classList.toggle('hidden', state.authMode !== 'login');
+  }
+  if (signupForm) {
+    signupForm.classList.toggle('hidden', state.authMode !== 'signup');
+  }
+  if (authTitle) {
+    authTitle.textContent = state.authMode === 'signup' ? 'Create Account' : 'Welcome Back!';
+  }
+  if (authCopy) {
+    authCopy.textContent = state.authMode === 'signup'
+      ? 'Create your teacher account to start uploading marks'
+      : 'Login to access your dashboard';
+  }
+  if (authCard) {
+    authCard.dataset.mode = state.authMode;
+  }
+
+  hideAuthFeedback('login');
+  hideAuthFeedback('signup');
 }
 
-function buildPayloadFromForm(form) {
-    const formData = new FormData(form);
-    const payload = {};
-    const subjects = {};
+function applyRememberedEmail() {
+  const input = document.querySelector('#loginForm input[name="email"]');
+  const remember = document.querySelector('#loginForm input[name="rememberMe"]');
+  if (!input) {
+    return;
+  }
 
-    for (const [key, value] of formData.entries()) {
-        if (key.startsWith('subject_')) {
-            const subject = key.replace('subject_', '');
-            if (value !== '') {
-                subjects[subject] = Number(value);
-            }
-            continue;
-        }
-
-        payload[key] = value;
-    }
-
-    payload.Subjects = subjects;
-    return payload;
+  input.value = state.rememberEmail || '';
+  if (remember) {
+    remember.checked = Boolean(state.rememberEmail);
+  }
 }
 
-function calculateTotalPercentage(subjects) {
-    const values = Object.values(subjects).filter((value) => Number.isFinite(Number(value))).map(Number);
-    if (!values.length) {
-        return '--';
-    }
+function attachPasswordVisibilityToggles() {
+  document.querySelectorAll('[data-toggle-password]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const wrap = button.closest('.input-wrap');
+      const input = wrap?.querySelector('input');
+      if (!input) {
+        return;
+      }
 
-    const total = values.reduce((sum, value) => sum + value, 0) / values.length;
-    return `${total.toFixed(2)}%`;
-}
-
-function getStudentTotal(student) {
-    const subjectValues = Object.values(student?.Subjects || {})
-        .filter((value) => Number.isFinite(Number(value)))
-        .map(Number);
-    const calculated = subjectValues.length
-        ? Number((subjectValues.reduce((sum, value) => sum + value, 0) / subjectValues.length).toFixed(2))
-        : NaN;
-    const total = Number.isFinite(calculated)
-        ? calculated
-        : Number(student?.TotalPercentage ?? student?.Marks);
-    return Number.isFinite(total) ? total : 0;
-}
-
-function getStudentSemester(student) {
-    const semester = String(student?.Semester || '').trim();
-    return semester && semester !== 'undefined' ? semester : getSelectedSemester();
-}
-
-function getSemesterSubjectSummary(semester = getSelectedSemester()) {
-    const subjects = getSubjects(semester);
-    if (!subjects.length) {
-        return 'No subjects are configured for this semester yet.';
-    }
-
-    const preview = subjects.slice(0, 4).join(', ');
-    return subjects.length > 4
-        ? `${preview}, and ${subjects.length - 4} more subjects.`
-        : preview;
-}
-
-function compareStudentIds(left, right) {
-    return String(left?.ID || '').localeCompare(String(right?.ID || ''), undefined, {
-        numeric: true,
-        sensitivity: 'base',
+      const nextType = input.type === 'password' ? 'text' : 'password';
+      input.type = nextType;
+      button.textContent = nextType === 'password' ? 'Show' : 'Hide';
+      button.setAttribute('aria-label', nextType === 'password' ? 'Show password' : 'Hide password');
     });
+  });
 }
 
-function getStudentPageForSemester(semester = getSelectedSemester()) {
-    if (!state.studentPages) {
-        state.studentPages = {};
+function setSession(user, token) {
+  state.user = user;
+  state.token = token;
+  sessionStorage.setItem(STORAGE_KEYS.token, token);
+  sessionStorage.setItem(STORAGE_KEYS.user, JSON.stringify(user));
+
+  if (state.rememberEmail) {
+    localStorage.setItem(STORAGE_KEYS.rememberEmail, state.rememberEmail);
+  }
+}
+
+function clearSession() {
+  state.token = '';
+  state.user = null;
+  state.currentUploadId = '';
+  state.currentUpload = null;
+  state.analytics = null;
+  state.students = [];
+  state.history = [];
+  state.profile = null;
+  state.profileStats = null;
+  state.insights = null;
+  state.queryReply = '';
+  sessionStorage.removeItem(STORAGE_KEYS.token);
+  sessionStorage.removeItem(STORAGE_KEYS.user);
+  sessionStorage.removeItem(STORAGE_KEYS.currentUploadId);
+}
+
+function showAuth() {
+  authScreen.classList.remove('hidden');
+  appShell.classList.add('hidden');
+  document.body.style.overflow = 'auto';
+}
+
+function showApp() {
+  authScreen.classList.add('hidden');
+  appShell.classList.remove('hidden');
+  document.body.style.overflow = 'auto';
+}
+
+function setView(view) {
+  state.view = view;
+  const meta = PAGE_META[view] || PAGE_META.upload;
+  topbarTitle.textContent = meta.title;
+  topbarSubtitle.textContent = meta.subtitle;
+  renderSidebar();
+  renderTopbarToggle();
+  renderPage();
+
+  if (view === 'insights') {
+    ensureInsights().catch(() => {});
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderSidebar() {
+  const homeButton = document.querySelector('.nav-item[data-home-nav="true"]');
+  if (homeButton) {
+    const homeView = ['upload', 'processing'].includes(state.view) ? 'upload' : 'dashboard';
+    homeButton.dataset.view = homeView;
+    homeButton.textContent = homeView === 'upload' ? 'Home / Upload' : 'Home / Dashboard';
+    homeButton.classList.toggle('active', ['upload', 'processing', 'dashboard', 'insights'].includes(state.view));
+  }
+
+  document.querySelectorAll('.nav-item[data-view]').forEach((button) => {
+    if (button === homeButton) {
+      return;
     }
-
-    return state.studentPages[semester] || 1;
+    button.classList.toggle('active', button.dataset.view === state.view);
+  });
 }
 
-function setStudentPageForSemester(semester, page) {
-    if (!state.studentPages) {
-        state.studentPages = {};
+function renderTopbarToggle() {
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  if (!sidebarToggle) {
+    return;
+  }
+
+  if (state.view === 'processing') {
+    sidebarToggle.textContent = '←';
+    sidebarToggle.setAttribute('aria-label', 'Back to upload');
+    return;
+  }
+
+  sidebarToggle.textContent = '☰';
+  sidebarToggle.setAttribute('aria-label', 'Toggle navigation');
+}
+
+function renderTeacherChip() {
+  const name = state.user?.fullName || state.profile?.fullName || 'Teacher';
+  teacherName.textContent = name;
+  teacherInitial.textContent = name.trim().charAt(0).toUpperCase() || 'T';
+}
+
+function getCategoryClass(category) {
+  const lower = String(category || '').toLowerCase();
+  if (lower.includes('top')) {
+    return 'top';
+  }
+  if (lower.includes('weak')) {
+    return 'weak';
+  }
+  if (lower.includes('fail')) {
+    return 'fail';
+  }
+  return 'average';
+}
+
+function getStatusClass(status) {
+  return String(status || '').toLowerCase() === 'pass' ? 'pass' : 'fail';
+}
+
+function getCurrentUpload() {
+  return state.currentUpload || null;
+}
+
+function getCurrentUploadId() {
+  return state.currentUploadId || state.currentUpload?._id || '';
+}
+
+function getAverageMarks() {
+  const number = Number(state.analytics?.averageMarks);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function getWeakCount() {
+  return state.students.filter((student) => Number(student.percentage) < 40 || String(student.category || '').toLowerCase().includes('weak')).length;
+}
+
+function getTopPerformers(limit = 5) {
+  return [...state.students]
+    .sort((left, right) => Number(right.marks) - Number(left.marks) || Number(left.rank) - Number(right.rank))
+    .slice(0, limit);
+}
+
+function getWeakStudents(limit = 5) {
+  return [...state.students]
+    .filter((student) => Number(student.percentage) < 40 || String(student.status).toLowerCase() === 'fail')
+    .sort((left, right) => Number(left.marks) - Number(right.marks))
+    .slice(0, limit);
+}
+
+function getFilteredStudents() {
+  const search = state.filters.search.trim().toLowerCase();
+  return [...state.students].filter((student) => {
+    const rollNo = String(student.rollNo || '').toLowerCase();
+    const studentName = String(student.studentName || '').toLowerCase();
+    const status = String(student.status || '').toLowerCase();
+    const category = String(student.category || '').toLowerCase();
+    const marks = Number(student.percentage);
+
+    if (search && !rollNo.includes(search) && !studentName.includes(search)) {
+      return false;
     }
-
-    state.studentPages[semester] = page;
+    if (state.filters.status !== 'all' && status !== state.filters.status) {
+      return false;
+    }
+    if (state.filters.category !== 'all' && category !== state.filters.category) {
+      return false;
+    }
+    if (state.filters.range !== 'all') {
+      if (state.filters.range === '0-39' && marks >= 40) return false;
+      if (state.filters.range === '40-59' && (marks < 40 || marks >= 60)) return false;
+      if (state.filters.range === '60-79' && (marks < 60 || marks >= 80)) return false;
+      if (state.filters.range === '80-100' && marks < 80) return false;
+    }
+    return true;
+  });
 }
 
-function getPagedStudents(students, semester = getSelectedSemester()) {
-    const totalPages = Math.max(1, Math.ceil(students.length / STUDENTS_PER_PAGE));
-    const activePage = Math.min(getStudentPageForSemester(semester), totalPages);
-    const start = (activePage - 1) * STUDENTS_PER_PAGE;
+function getCategoryCounts() {
+  const counts = {
+    'Top Performer': 0,
+    'Average Performer': 0,
+    'Weak Student': 0,
+    Failed: 0,
+  };
 
-    setStudentPageForSemester(semester, activePage);
+  for (const student of state.students) {
+    if (counts[student.category] !== undefined) {
+      counts[student.category] += 1;
+    } else if (String(student.status).toLowerCase() === 'pass') {
+      counts['Average Performer'] += 1;
+    } else {
+      counts.Failed += 1;
+    }
+  }
 
+  return counts;
+}
+
+function getTrendData() {
+  const uploads = [...state.history]
+    .filter((upload) => upload.analytics?.averageMarks !== undefined)
+    .sort((left, right) => new Date(left.uploadDate) - new Date(right.uploadDate));
+
+  const labels = uploads.map((upload) => formatDateOnly(upload.uploadDate));
+  const values = uploads.map((upload) => Number(upload.analytics.averageMarks) || 0);
+
+  if (!labels.length && state.currentUpload && state.analytics) {
     return {
-        students: students.slice(start, start + STUDENTS_PER_PAGE),
-        totalPages,
-        activePage,
+      labels: [formatDateOnly(state.currentUpload.uploadDate)],
+      values: [Number(state.analytics.averageMarks) || 0],
     };
+  }
+
+  return { labels, values };
 }
 
-function renderStudentPager(semester = getSelectedSemester(), totalPages = 1, activePage = 1) {
-    if (totalPages <= 1) {
-        return '';
-    }
+function getImprovementRate() {
+  const trend = getTrendData();
+  if (trend.values.length < 2) {
+    const average = getAverageMarks();
+    return Math.round(average / 5);
+  }
 
-    return `
-        <div class="subject-pager" aria-label="Student pages">
-            ${Array.from({ length: totalPages }, (_, index) => {
-                const page = index + 1;
-                return `
-                    <button
-                        class="subject-page-btn ${page === activePage ? 'active' : ''}"
-                        type="button"
-                        data-student-page="${page}"
-                        data-semester="${escapeHtml(semester)}"
-                        aria-label="Show student page ${page}"
-                    >${page}</button>
-                `;
-            }).join('')}
-        </div>
-    `;
-}
-
-const moduleTemplates = {
-    visuals() {
-        const semester = getSelectedSemester();
-        return `
-            <section class="module-hero slide-in-panel">
-                <div>
-                    <p class="eyebrow">Semester Analytics</p>
-                    <h3>${semester} performance visuals</h3>
-                    <p class="module-hero-copy">Charts below are filtered to ${semester} and use total percentage, so teachers can focus on the term they are currently evaluating.</p>
-                </div>
-                <div class="module-hero-badge">
-                    <span>Records</span>
-                    <strong>${state.students.length}</strong>
-                </div>
-            </section>
-            <div class="viz-container slide-in-panel">
-                <section class="chart-box slide-card">
-                    <div class="section-heading">
-                        <h3>Total Percentage Overview</h3>
-                        <p>Compare ${semester} total percentages across the class.</p>
-                    </div>
-                    <canvas id="barChart"></canvas>
-                </section>
-                <section class="chart-box slide-card">
-                    <div class="section-heading">
-                        <h3>Grade Split</h3>
-                        <p>Quick view of excellence, good performance, and support needs.</p>
-                    </div>
-                    <canvas id="pieChart"></canvas>
-                </section>
-                <section class="chart-box full slide-card">
-                    <div class="section-heading">
-                        <h3>Attendance vs Percentage</h3>
-                        <p>Spot students whose ${semester} attendance may be affecting performance.</p>
-                    </div>
-                    <canvas id="lineChart"></canvas>
-                </section>
-            </div>`;
-    },
-    ranks() {
-        const sorted = [...state.students].sort((left, right) => getStudentTotal(right) - getStudentTotal(left));
-        const semester = getSelectedSemester();
-        const rows = sorted.map((student, index) => `
-            <tr>
-                <td><span class="rank-pill">#${index + 1}</span></td>
-                <td>${student.ID}</td>
-                <td>${student.Name}</td>
-                <td><span class="score-chip">${getStudentTotal(student)}%</span></td>
-                <td>${student.Attendance}%</td>
-            </tr>
-        `).join('');
-
-        return `
-            <section class="module-hero slide-in-panel">
-                <div>
-                    <p class="eyebrow">Merit List</p>
-                    <h3>${semester} rankings</h3>
-                    <p class="module-hero-copy">This list is ordered by total percentage, so teachers can quickly identify top performers and students who may need extra support.</p>
-                </div>
-                <div class="module-hero-badge">
-                    <span>Students</span>
-                    <strong>${sorted.length}</strong>
-                </div>
-            </section>
-            <div class="table-shell slide-in-panel">
-                <div class="table-header">
-                    <div>
-                        <p class="eyebrow">Full Rankings</p>
-                        <h3>Ordered by total percentage</h3>
-                    </div>
-                </div>
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Rank</th>
-                            <th>ID</th>
-                            <th>Name</th>
-                            <th>Total %</th>
-                            <th>Attendance</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>`;
-    },
-    subjects() {
-        const semester = getSelectedSemester();
-        const semesterSubjects = getSubjects(semester);
-        const orderedStudents = [...state.students].sort(compareStudentIds);
-        const { students, totalPages, activePage } = getPagedStudents(orderedStudents, semester);
-
-        const subjectCards = semesterSubjects.map((subject) => {
-            const values = orderedStudents
-                .map((student) => student.Subjects?.[subject])
-                .filter((marks) => Number.isFinite(Number(marks)))
-                .map(Number);
-            const average = values.length
-                ? `${(values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)}%`
-                : '--';
-
-            return `
-                <article class="info-card slide-card">
-                    <span>${escapeHtml(subject)}</span>
-                    <strong>${average}</strong>
-                </article>
-            `;
-        }).join('');
-
-        return `
-            <section class="module-hero slide-in-panel">
-                <div>
-                    <p class="eyebrow">Subject Analysis</p>
-                    <h3>${semester} subject-wise marks</h3>
-                    <p class="module-hero-copy">All subjects stay together for each student, while the student list is split across smaller pages so the screen stays easy to read.</p>
-                </div>
-                <div class="module-hero-badge">
-                    <span>Students</span>
-                    <strong>${orderedStudents.length}</strong>
-                </div>
-            </section>
-            <section class="subject-summary-grid slide-in-panel">
-                ${subjectCards}
-            </section>
-            <div class="table-shell slide-in-panel">
-                <div class="table-header">
-                    <div>
-                        <p class="eyebrow">Subject Breakdown</p>
-                        <h3>${semester} student records</h3>
-                        <p>Showing students ${((activePage - 1) * STUDENTS_PER_PAGE) + 1}-${Math.min(activePage * STUDENTS_PER_PAGE, orderedStudents.length)} of ${orderedStudents.length}, ordered by roll number.</p>
-                    </div>
-                </div>
-                <div class="student-records">
-                    ${students.map((student) => `
-                        <article class="student-record slide-card">
-                            <div class="student-record-header">
-                                <div>
-                                    <p class="student-record-id">${escapeHtml(student.ID)}</p>
-                                    <h4>${escapeHtml(student.Name)}</h4>
-                                </div>
-                                <div class="student-record-meta">
-                                    <span class="score-chip">${getStudentTotal(student)}%</span>
-                                    <span class="attendance-chip">${Number(student.Attendance) || 0}% attendance</span>
-                                </div>
-                            </div>
-                            <div class="student-subject-grid">
-                                ${semesterSubjects.map((subject) => `
-                                    <div class="student-subject-cell">
-                                        <span>${escapeHtml(subject)}</span>
-                                        <strong>${student.Subjects?.[subject] ?? '--'}</strong>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </article>
-                    `).join('')}
-                </div>
-            </div>
-            ${renderStudentPager(semester, totalPages, activePage)}
-        `;
-    },
-    average() {
-        const stats = state.stats;
-        const semester = getSelectedSemester();
-        const semesterSubjects = getSubjects(semester);
-        const topPerformer = stats.topPerformer
-            ? `${stats.topPerformer.Name} is currently leading ${semester} with ${getStudentTotal(stats.topPerformer)}% total percentage and ${stats.topPerformer.Attendance}% attendance.`
-            : `No performance records are available yet for ${semester}.`;
-
-        const subjectAverageCards = semesterSubjects.map((subject) => {
-            const values = state.students
-                .map((student) => student.Subjects?.[subject])
-                .filter((marks) => Number.isFinite(Number(marks)))
-                .map(Number);
-            const average = values.length
-                ? `${(values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)}%`
-                : '--';
-
-            return `
-                <article class="info-card slide-card">
-                    <span>${escapeHtml(subject)}</span>
-                    <strong>${average}</strong>
-                </article>
-            `;
-        }).join('');
-
-        return `
-            <section class="module-hero slide-in-panel">
-                <div>
-                    <p class="eyebrow">Semester Snapshot</p>
-                    <h3>${semester} statistics overview</h3>
-                    <p class="module-hero-copy">Review total percentage, attendance, and subject-wise averages for ${semester} only.</p>
-                </div>
-                <div class="module-hero-badge">
-                    <span>Average Total</span>
-                    <strong>${stats.averageMarks}%</strong>
-                </div>
-            </section>
-            <div class="stats-grid slide-in-panel">
-                <article class="info-card slide-card">
-                    <span>Average Total Percentage</span>
-                    <strong>${stats.averageMarks}%</strong>
-                </article>
-                <article class="info-card slide-card">
-                    <span>Average Attendance</span>
-                    <strong>${stats.averageAttendance}%</strong>
-                </article>
-                <article class="info-card slide-card">
-                    <span>Excellent Scores</span>
-                    <strong>${stats.gradeCounts.excellent}</strong>
-                </article>
-                <article class="info-card slide-card">
-                    <span>Needs Support</span>
-                    <strong>${stats.gradeCounts.needsSupport}</strong>
-                </article>
-            </div>
-            <section class="subject-summary-grid slide-in-panel">
-                ${subjectAverageCards}
-            </section>
-            <section class="insight-panel slide-card">
-                <h3>Class Insight</h3>
-                <p>${topPerformer}</p>
-            </section>`;
-    },
-    add() {
-        return `
-            <section class="module-hero slide-in-panel">
-                <div>
-                    <p class="eyebrow">Semester Entry</p>
-                    <h3>Manage semester totals and subject marks</h3>
-                    <p class="module-hero-copy">Teachers can record subject-wise marks for each student, and the system will automatically calculate the semester total percentage.</p>
-                </div>
-                <div class="module-hero-badge">
-                    <span>Active Semester</span>
-                    <strong>${getSelectedSemester()}</strong>
-                </div>
-            </section>
-            <div class="stacked-panels slide-in-panel">
-                <form id="studentForm" class="student-form panel-card slide-card">
-                    <div class="section-heading">
-                        <h3>Add One Semester Result</h3>
-                        <p>Enter one student's subject marks for a specific semester.</p>
-                    </div>
-                    <div class="form-grid">
-                        <label>
-                            <span>Student ID</span>
-                            <input name="ID" type="text" placeholder="2451-22-733-007" required>
-                        </label>
-                        <label>
-                            <span>Student Name</span>
-                            <input name="Name" type="text" placeholder="Student name" required>
-                        </label>
-                        <label>
-                            <span>Semester</span>
-                            <select name="Semester" class="form-select" required>${renderSemesterOptions()}</select>
-                        </label>
-                        <label>
-                            <span>Attendance</span>
-                            <input name="Attendance" type="number" min="0" max="100" placeholder="0-100" required>
-                        </label>
-                    </div>
-                    <div class="semester-subject-note">
-                        <span>Subjects in this semester</span>
-                        <strong id="subjectTemplateLabel">${getSemesterSubjectSummary()}</strong>
-                    </div>
-                    <div id="subjectInputGrid" class="subject-form-grid">
-                        ${renderSubjectInputs({}, getSelectedSemester())}
-                    </div>
-                    <div class="calculated-total">
-                        <span>Total Percentage</span>
-                        <strong id="calculatedTotal">--</strong>
-                    </div>
-                    <div class="form-actions">
-                        <button class="primary-btn" type="submit">Save Result</button>
-                    </div>
-                </form>
-
-                <form id="importForm" class="student-form panel-card slide-card">
-                    <div class="section-heading">
-                        <h3>Import Semester Results</h3>
-                        <p>Upload Excel, PDF, or Word files with either a total percentage or subject-wise columns for the selected semester.</p>
-                    </div>
-                    <label>
-                        <span>Semester</span>
-                        <select name="semester" class="form-select" required>${renderSemesterOptions()}</select>
-                    </label>
-                    <label class="upload-label">
-                        <span>Supported formats</span>
-                        <input name="file" type="file" accept=".xlsx,.xls,.pdf,.docx" required>
-                    </label>
-                    <div id="importSubjectTip" class="upload-tip">
-                        Use columns or text fields named <code>ID</code>, <code>Name</code>, <code>Semester</code>, <code>Attendance</code>, and the subject columns configured for the selected semester.
-                    </div>
-                    <div class="form-actions">
-                        <button class="primary-btn" type="submit">Import File</button>
-                    </div>
-                </form>
-            </div>`;
-    },
-};
-
-async function fetchJson(url, options = {}) {
-    const headers = { ...(options.headers || {}) };
-    if (!(options.body instanceof FormData) && !headers['Content-Type']) {
-        headers['Content-Type'] = 'application/json';
-    }
-
-    const response = await fetch(url, {
-        ...options,
-        headers,
-    });
-
-    const data = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-        throw new Error(data.message || 'Request failed.');
-    }
-
-    return data;
-}
-
-function setFeedback(message, type = 'info') {
-    const feedback = document.getElementById('feedback');
-
-    if (!feedback) {
-        return;
-    }
-
-    if (!message) {
-        feedback.textContent = '';
-        feedback.className = 'feedback hidden';
-        return;
-    }
-
-    feedback.textContent = message;
-    feedback.className = `feedback ${type}`;
-}
-
-function setLoginFeedback(message, type = 'info') {
-    const feedback = document.getElementById('loginFeedback');
-
-    if (!feedback) {
-        return;
-    }
-
-    if (!message) {
-        feedback.textContent = '';
-        feedback.className = 'inline-feedback hidden';
-        return;
-    }
-
-    feedback.textContent = message;
-    feedback.className = `inline-feedback ${type}`;
-}
-
-function updateSemesterLabels() {
-    const label = `Showing results for ${getSelectedSemester()}`;
-    const activeSemesterLabel = document.getElementById('activeSemesterLabel');
-    const moduleSemesterLabel = document.getElementById('moduleSemesterLabel');
-
-    if (activeSemesterLabel) {
-        activeSemesterLabel.textContent = label;
-    }
-
-    if (moduleSemesterLabel) {
-        moduleSemesterLabel.textContent = label;
-    }
-}
-
-function syncSemesterControls() {
-    const options = renderSemesterOptions();
-    document.querySelectorAll('.semester-select').forEach((select) => {
-        select.innerHTML = options;
-        select.value = getSelectedSemester();
-    });
-    updateSemesterLabels();
-}
-
-function updateImportTip(semester) {
-    const tip = document.getElementById('importSubjectTip');
-    if (!tip) {
-        return;
-    }
-
-    const subjects = getSubjects(semester);
-    tip.innerHTML = `Use columns or text fields named <code>ID</code>, <code>Name</code>, <code>Semester</code>, <code>Attendance</code>, and subject columns for ${escapeHtml(semester)} such as ${subjects.map((subject) => `<code>${escapeHtml(subject)}</code>`).join(', ')}.`;
-}
-
-function updateSubjectFieldsForSemester(semester) {
-    const form = document.getElementById('studentForm');
-    const grid = document.getElementById('subjectInputGrid');
-    const templateLabel = document.getElementById('subjectTemplateLabel');
-
-    if (!form || !grid || !templateLabel) {
-        return;
-    }
-
-    const previousSubjects = buildPayloadFromForm(form).Subjects;
-    const student = { Subjects: previousSubjects };
-    grid.innerHTML = renderSubjectInputs(student, semester);
-    templateLabel.textContent = getSemesterSubjectSummary(semester);
-    updateCalculatedTotalDisplay(form);
-}
-
-function updateDashboardStats() {
-    if (!state.stats) {
-        return;
-    }
-
-    const totalStudents = document.getElementById('totalStudents');
-    const averageMarks = document.getElementById('averageMarks');
-    const averageAttendance = document.getElementById('averageAttendance');
-    const topPerformer = document.getElementById('topPerformer');
-
-    if (totalStudents) {
-        totalStudents.textContent = state.stats.totalStudents;
-    }
-
-    if (averageMarks) {
-        averageMarks.textContent = `${state.stats.averageMarks}%`;
-    }
-
-    if (averageAttendance) {
-        averageAttendance.textContent = `${state.stats.averageAttendance}%`;
-    }
-
-    if (topPerformer) {
-        topPerformer.textContent = state.stats.topPerformer
-            ? `${state.stats.topPerformer.Name} (${getStudentTotal(state.stats.topPerformer)}%)`
-            : 'No data';
-    }
-}
-
-function updateThemeButtons() {
-    const label = state.theme === 'dark' ? 'Light Mode' : 'Dark Mode';
-    document.querySelectorAll('.theme-toggle').forEach((button) => {
-        button.textContent = label;
-    });
-}
-
-function applyTheme(theme) {
-    state.theme = theme;
-    document.body.dataset.theme = theme;
-    localStorage.setItem('tbp-theme', theme);
-    updateThemeButtons();
-}
-
-function toggleTheme() {
-    applyTheme(state.theme === 'dark' ? 'light' : 'dark');
+  const last = trend.values.at(-1);
+  const prev = trend.values.at(-2);
+  return Math.round(last - prev);
 }
 
 function destroyCharts() {
-    state.charts.forEach((chart) => chart.destroy());
-    state.charts = [];
+  for (const chart of state.charts) {
+    chart.destroy();
+  }
+  state.charts = [];
 }
 
-function applyMotion(root = document) {
-    root.querySelectorAll('.slide-card').forEach((element, index) => {
-        element.style.setProperty('--delay', `${index * 90}ms`);
-    });
+function chartOptions(extra = {}) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: {
+          color: '#334155',
+          font: {
+            family: 'Manrope, sans-serif',
+          },
+        },
+      },
+      tooltip: {
+        backgroundColor: '#0f172a',
+        titleColor: '#fff',
+        bodyColor: '#fff',
+      },
+      ...extra.plugins,
+    },
+    ...extra,
+  };
 }
 
 function renderCharts() {
-    destroyCharts();
+  destroyCharts();
+  if (!window.Chart) {
+    return;
+  }
 
-    const labels = state.students.map((student) => student.Name);
-    const totals = state.students.map((student) => student.TotalPercentage);
-    const attendance = state.students.map((student) => student.Attendance);
-    const gradeCounts = state.stats.gradeCounts;
+  const analytics = state.analytics;
+  const students = state.students;
+  if (!analytics || !students.length) {
+    return;
+  }
 
-    state.charts.push(
-        new Chart(document.getElementById('barChart'), {
-            type: 'bar',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Total Percentage',
-                    data: totals,
-                    backgroundColor: '#ff8a3d',
-                    borderRadius: 10,
-                }],
-            },
-            options: {
-                responsive: true,
-                animation: chartAnimation,
-                plugins: {
-                    legend: { display: false },
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                    },
-                },
-            },
-        })
+  const pieCanvas = document.getElementById('passFailChart');
+  const barCanvas = document.getElementById('distributionChart');
+  const topCanvas = document.getElementById('topPerformerChart');
+  const categoryCanvas = document.getElementById('categoryChart');
+  const trendCanvas = document.getElementById('trendChart');
+
+  if (pieCanvas) {
+    state.charts.push(new Chart(pieCanvas, {
+      type: 'pie',
+      data: {
+        labels: ['Passed', 'Failed'],
+        datasets: [{
+          data: [analytics.passedStudents || 0, analytics.failedStudents || 0],
+          backgroundColor: ['#22c55e', '#ef4444'],
+          borderWidth: 0,
+        }],
+      },
+      options: chartOptions({
+        plugins: {
+          legend: {
+            position: 'bottom',
+          },
+        },
+      }),
+    }));
+  }
+
+  if (barCanvas) {
+    const distribution = analytics.marksDistribution || {};
+    state.charts.push(new Chart(barCanvas, {
+      type: 'bar',
+      data: {
+        labels: ['0-35', '36-50', '51-70', '71-85', '86-100'],
+        datasets: [{
+          label: 'Students',
+          data: [
+            distribution.range_0_35 || 0,
+            distribution.range_36_50 || 0,
+            distribution.range_51_70 || 0,
+            distribution.range_71_85 || 0,
+            distribution.range_86_100 || 0,
+          ],
+          backgroundColor: ['#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8', '#0f55e9'],
+          borderRadius: 10,
+        }],
+      },
+      options: chartOptions({
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#475569' },
+            grid: { display: false },
+          },
+          y: {
+            ticks: { color: '#475569' },
+            grid: { color: 'rgba(148, 163, 184, 0.2)' },
+          },
+        },
+      }),
+    }));
+  }
+
+  if (topCanvas) {
+    const topStudents = getTopPerformers(10).reverse();
+    state.charts.push(new Chart(topCanvas, {
+      type: 'bar',
+      data: {
+        labels: topStudents.map((student) => `${student.studentName}`),
+        datasets: [{
+          label: 'Marks',
+          data: topStudents.map((student) => Number(student.marks) || 0),
+          backgroundColor: '#22c55e',
+          borderRadius: 12,
+        }],
+      },
+      options: chartOptions({
+        indexAxis: 'y',
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#475569' },
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+          y: {
+            ticks: { color: '#475569' },
+            grid: { display: false },
+          },
+        },
+      }),
+    }));
+  }
+
+  if (categoryCanvas) {
+    const counts = getCategoryCounts();
+    state.charts.push(new Chart(categoryCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(counts),
+        datasets: [{
+          data: Object.values(counts),
+          backgroundColor: ['#2563eb', '#22c55e', '#f59e0b', '#ef4444'],
+          borderWidth: 0,
+        }],
+      },
+      options: chartOptions({
+        cutout: '55%',
+        plugins: {
+          legend: {
+            position: 'bottom',
+          },
+        },
+      }),
+    }));
+  }
+
+  if (trendCanvas) {
+    const trend = getTrendData();
+    state.charts.push(new Chart(trendCanvas, {
+      type: 'line',
+      data: {
+        labels: trend.labels,
+        datasets: [{
+          label: 'Average Marks',
+          data: trend.values,
+          tension: 0.35,
+          borderColor: '#2563eb',
+          backgroundColor: 'rgba(37, 99, 235, 0.12)',
+          fill: true,
+          pointRadius: 4,
+          pointBackgroundColor: '#2563eb',
+        }],
+      },
+      options: chartOptions({
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            ticks: { color: '#475569' },
+            grid: { display: false },
+          },
+          y: {
+            ticks: { color: '#475569' },
+            grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+        },
+      }),
+    }));
+  }
+}
+
+function renderSummaryCards() {
+  const analytics = state.analytics;
+  if (!analytics) {
+    return '';
+  }
+
+  const total = analytics.totalStudents || state.students.length || 0;
+  const weak = getWeakCount();
+
+  const cards = [
+    { label: 'Total Students', value: total, note: 'Students in the current subject', accent: 'low' },
+    { label: 'Passed Students', value: analytics.passedStudents || 0, note: `${formatPercent(analytics.passPercentage || 0)} pass rate`, accent: 'pass' },
+    { label: 'Failed Students', value: analytics.failedStudents || 0, note: `${formatPercent(analytics.failPercentage || 0)} fail rate`, accent: 'fail' },
+    { label: 'Average Marks', value: formatPercent(analytics.averageMarks || 0), note: 'Class average for the upload', accent: 'avg' },
+    { label: 'Highest Marks', value: analytics.highestMarks ?? 0, note: 'Best score in the file', accent: 'high' },
+    { label: 'Weak Students', value: weak, note: 'Students below 40%', accent: 'weak' },
+  ];
+
+  return cards.map((card) => `
+    <article class="summary-card ${card.accent}">
+      <span class="summary-label">${escapeHtml(card.label)}</span>
+      <strong class="summary-value">${escapeHtml(card.value)}</strong>
+      <span class="summary-note">${escapeHtml(card.note)}</span>
+      <span class="summary-accent"></span>
+    </article>
+  `).join('');
+}
+
+function renderUploadPage() {
+  return `
+    <section class="page">
+      <div class="hero-card page-card">
+        <div>
+          <p class="eyebrow">Home / Upload</p>
+          <h1 class="page-title">Upload Subject Marks</h1>
+          <p class="page-copy">Upload marks file for a single subject to generate performance analytics.</p>
+          <div class="hero-info">
+            <span class="badge">CSV</span>
+            <span class="badge">Excel</span>
+            <span class="badge">Structured PDF</span>
+            <span class="badge">Single subject</span>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" data-view="dashboard">Go to Dashboard</button>
+          <button class="primary-btn" type="button" data-view="history">Open History</button>
+        </div>
+      </div>
+
+      <div class="upload-layout">
+        <section class="page-card">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">1. Subject Details</p>
+              <h3>Upload Subject Marks</h3>
+              <p>Use the same subject details your teacher record uses in MongoDB.</p>
+            </div>
+          </div>
+
+          <form id="uploadForm" class="upload-form-shell">
+            <div class="upload-form-grid">
+              <label class="field">
+                <span>Subject Name *</span>
+                <input name="subjectName" type="text" placeholder="Enter subject name" required>
+              </label>
+              <label class="field">
+                <span>Class *</span>
+                <select name="className" required>
+                  <option value="" selected disabled>Select class</option>
+                  <option>BCA</option>
+                  <option>BSc CS</option>
+                  <option>BSc IT</option>
+                  <option>BCom</option>
+                  <option>BA</option>
+                  <option>MCA</option>
+                  <option>MSc</option>
+                  <option>Other</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Maximum Marks *</span>
+                <input name="maxMarks" type="number" min="1" max="1000" placeholder="Enter maximum marks" value="100" required>
+              </label>
+              <label class="field">
+                <span>Passing Marks *</span>
+                <input name="passingMarks" type="number" min="0" max="1000" placeholder="Enter passing marks" value="35" required>
+              </label>
+            </div>
+
+            <div class="field">
+              <span>Choose File *</span>
+              <label id="dropZone" class="drop-zone" for="marksFile">
+                <div class="drop-icon">⇪</div>
+                <strong>Drag and drop your file here</strong>
+                <span>or</span>
+                <button class="ghost-btn" type="button" id="chooseFileBtn">Choose File</button>
+                <small>Supported formats: CSV, Excel (.xlsx, .xls), PDF (structured)</small>
+                <small>Maximum file size: 10MB</small>
+                <input id="marksFile" name="file" type="file" accept=".csv,.xlsx,.xls,.pdf" class="hidden">
+              </label>
+              <div class="upload-meta" id="selectedFileMeta">No file selected yet.</div>
+            </div>
+
+            <button class="primary-btn" type="button" data-upload-submit>Upload &amp; Analyze</button>
+            <div id="uploadFeedback" class="inline-feedback hidden" role="status" aria-live="polite"></div>
+          </form>
+        </section>
+
+        <aside class="upload-side">
+          <section class="check-card">
+            <p class="eyebrow">File Requirements</p>
+            <h3>Keep the upload clean</h3>
+            <ul class="check-list">
+              <li><span class="check-icon">✓</span><span>File must be CSV, Excel, or structured PDF.</span></li>
+              <li><span class="check-icon">✓</span><span>File should not be empty.</span></li>
+              <li><span class="check-icon">✓</span><span>Required columns: Roll No, Student Name, Marks.</span></li>
+              <li><span class="check-icon">✓</span><span>Marks should be numeric and within the maximum marks range.</span></li>
+              <li><span class="check-icon">✓</span><span>No duplicate roll numbers.</span></li>
+            </ul>
+          </section>
+
+          <section class="check-card alt">
+            <p class="eyebrow">Required Columns</p>
+            <h3>Your file must contain</h3>
+            <ul class="check-list">
+              <li><span class="check-icon">1</span><span><strong>Roll No</strong></span></li>
+              <li><span class="check-icon">2</span><span><strong>Student Name</strong></span></li>
+              <li><span class="check-icon">3</span><span><strong>Marks</strong></span></li>
+            </ul>
+          </section>
+
+          <section class="check-card note">
+            <p class="eyebrow">Note</p>
+            <h3>After upload</h3>
+            <p>Once the file is processed, the system will take you to the analytics dashboard automatically.</p>
+          </section>
+        </aside>
+      </div>
+    </section>
+  `;
+}
+
+function renderProcessingPage() {
+  const upload = state.processing;
+  const progress = Math.max(0, Math.min(100, upload.progress || 0));
+  const validationItems = [
+    { title: 'File type is valid', done: progress >= 18, state: progress >= 18 ? 'Completed' : 'Pending' },
+    { title: 'File is not empty', done: progress >= 22, state: progress >= 22 ? 'Completed' : 'Pending' },
+    { title: 'Required columns found', done: progress >= 42, state: progress >= 42 ? 'Completed' : 'Pending' },
+    { title: 'Marks are numeric', done: progress >= 58, state: progress >= 58 ? 'Completed' : 'Pending' },
+    { title: 'No duplicate roll numbers', done: progress >= 72, state: progress >= 72 ? 'Completed' : 'Pending' },
+    { title: 'Marks are within the valid range', done: progress >= 86, state: progress >= 86 ? 'Completed' : 'Pending' },
+  ];
+  const stepData = [
+    { title: 'File Uploaded', state: progress >= 20 ? 'Completed' : 'Pending', done: progress >= 20, active: progress >= 10 && progress < 20 },
+    { title: 'Validating File', state: progress >= 45 ? 'Completed' : progress >= 20 ? 'In Progress' : 'Pending', done: progress >= 45, active: progress >= 20 && progress < 45 },
+    { title: 'Processing Data', state: progress >= 80 ? 'Completed' : progress >= 45 ? 'In Progress' : 'Pending', done: progress >= 80, active: progress >= 45 && progress < 80 },
+    { title: 'Completed', state: progress >= 100 ? 'Completed' : 'Pending', done: progress >= 100, active: progress >= 80 && progress < 100 },
+  ];
+
+  return `
+    <section class="page">
+      <div class="processing-card">
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">File Validation &amp; Processing</p>
+            <h3>Please wait while we validate and process your uploaded file.</h3>
+            <p>${escapeHtml(upload.fileName || 'Selected file')}</p>
+          </div>
+          <div class="badge-row">
+            <span class="badge">${escapeHtml(upload.fileSize ? `${Math.max(1, Math.round(upload.fileSize / 1024))} KB` : 'Processing')}</span>
+            <span class="badge">${progress}%</span>
+          </div>
+        </div>
+
+        <div class="progress-shell">
+          <div class="status-line">
+            <span>Processing Student Records...</span>
+            <span>${progress}%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-bar" style="width:${progress}%"></div>
+          </div>
+        </div>
+
+        <div class="section-split" style="margin-top:1rem;">
+          <section class="check-card">
+            <p class="eyebrow">Validation Results</p>
+            <h3>Checks completed before analytics</h3>
+            <ul class="check-list">
+              ${validationItems.map((item) => `
+                <li class="${item.done ? 'done' : ''}">
+                  <span class="check-icon">${item.done ? '✓' : '○'}</span>
+                  <span>${escapeHtml(item.title)}</span>
+                  <span class="step-state">${escapeHtml(item.state)}</span>
+                </li>
+              `).join('')}
+            </ul>
+          </section>
+
+          <section class="check-card alt">
+            <p class="eyebrow">Processing Status</p>
+            <h3>Current workflow</h3>
+            <div class="step-list">
+              ${stepData.map((step) => `
+                <div class="step-item ${step.done ? 'done' : step.active ? 'active' : ''}">
+                  <div class="left">
+                    <span class="step-bullet">${step.done ? '✓' : step.active ? '•' : '○'}</span>
+                    <span>${escapeHtml(step.title)}</span>
+                  </div>
+                  <span class="step-state">${escapeHtml(step.state)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </section>
+        </div>
+
+        <div class="processing-summary" style="margin-top:1rem;">
+          ${escapeHtml(upload.message || 'We are validating and processing your file. Please wait a moment.')}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderEmptyState(title, message, buttonLabel, targetView) {
+  return `
+    <section class="page">
+      <div class="page-card dashboard-empty">
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(message)}</p>
+        <div class="history-actions" style="margin-top:1rem;">
+          <button class="primary-btn" type="button" data-view="${escapeHtml(targetView)}">${escapeHtml(buttonLabel)}</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderDashboardPage() {
+  const upload = getCurrentUpload();
+  if (!upload || !state.analytics || !state.students.length) {
+    return renderEmptyState(
+      'No analytics loaded yet',
+      'Upload a subject file or pick one from the history page to see the dashboard.',
+      'Go to Upload',
+      'upload'
     );
+  }
 
-    state.charts.push(
-        new Chart(document.getElementById('pieChart'), {
-            type: 'doughnut',
-            data: {
-                labels: ['Excellent', 'Good', 'Needs Support'],
-                datasets: [{
-                    data: [gradeCounts.excellent, gradeCounts.good, gradeCounts.needsSupport],
-                    backgroundColor: ['#ff8a3d', '#2ec4b6', '#7a3cff'],
-                }],
-            },
-            options: {
-                responsive: true,
-                animation: chartAnimation,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
-                    },
-                },
-            },
-        })
+  const passMarks = upload.passingMarks ?? 35;
+  const maxMarks = upload.maxMarks ?? 100;
+  const currentAverage = Number(state.analytics.averageMarks) || 0;
+  const improvementRate = getImprovementRate();
+  const categoryCounts = getCategoryCounts();
+  const topPerformers = getTopPerformers(5);
+  const weakStudents = getWeakStudents(5);
+  const filteredStudents = getFilteredStudents();
+  const weakCount = getWeakCount();
+  const passPercentage = Number(state.analytics.passPercentage) || 0;
+  const failPercentage = Number(state.analytics.failPercentage) || 0;
+
+  return `
+    <section class="page">
+      <div class="hero-card page-card">
+        <div>
+          <p class="eyebrow">Welcome, Teacher!</p>
+          <h1 class="page-title">Subject: ${escapeHtml(upload.subjectName)}</h1>
+          <p class="page-copy">Class: ${escapeHtml(upload.className)} | Uploaded on: ${escapeHtml(formatDate(upload.uploadDate))}</p>
+          <div class="hero-info">
+            <span class="badge">Pass Marks: ${escapeHtml(passMarks)}</span>
+            <span class="badge">Max Marks: ${escapeHtml(maxMarks)}</span>
+            <span class="badge">Records: ${escapeHtml(state.students.length)}</span>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" data-view="upload">Upload Another File</button>
+          <button class="ghost-btn" type="button" data-generate-insights>Open AI Insights</button>
+          <button class="primary-btn" type="button" data-download-report="pdf">Download PDF Report</button>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        ${renderSummaryCards()}
+      </div>
+
+      <div class="subnote-bar">
+        Pass Marks: ${escapeHtml(passMarks)} | Max Marks: ${escapeHtml(maxMarks)} | Pass Percentage: ${escapeHtml(formatPercent(passPercentage))} | Fail Percentage: ${escapeHtml(formatPercent(failPercentage))}
+      </div>
+
+      <div class="section-grid">
+        <section class="chart-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Performance</p>
+              <h3>Pass / Fail Distribution</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="passFailChart"></canvas>
+          </div>
+        </section>
+
+        <section class="chart-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Analysis</p>
+              <h3>Marks Distribution</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="distributionChart"></canvas>
+          </div>
+        </section>
+
+        <section class="chart-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Top Performers</p>
+              <h3>Top 5 Students</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="topPerformerChart"></canvas>
+          </div>
+        </section>
+      </div>
+
+      <div class="section-grid">
+        <section class="chart-card large">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Performance Table</p>
+              <h3>Top Performers</h3>
+            </div>
+          </div>
+          <div class="stack-list">
+            ${topPerformers.map((student, index) => `
+              <div class="performer-row">
+                <span class="index">${index + 1}</span>
+                <div>
+                  <strong>${escapeHtml(student.studentName)}</strong>
+                  <p style="margin:0;color:var(--muted);">Roll No ${escapeHtml(student.rollNo)} | Rank ${escapeHtml(student.rank)}</p>
+                </div>
+                <strong>${escapeHtml(formatPercent(student.percentage))}</strong>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+
+        <section class="chart-card large">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Support List</p>
+              <h3>Weak Students</h3>
+            </div>
+          </div>
+          <div class="stack-list">
+            ${weakStudents.length ? weakStudents.map((student, index) => `
+              <div class="performer-row">
+                <span class="index">${index + 1}</span>
+                <div>
+                  <strong>${escapeHtml(student.studentName)}</strong>
+                  <p style="margin:0;color:var(--muted);">Roll No ${escapeHtml(student.rollNo)} | Status ${escapeHtml(student.status)}</p>
+                </div>
+                <strong>${escapeHtml(formatPercent(student.percentage))}</strong>
+              </div>
+            `).join('') : `<div class="upload-empty"><strong>No weak students found</strong><p>All students are above the weak-student threshold for this upload.</p></div>`}
+          </div>
+        </section>
+
+        <section class="chart-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Status</p>
+              <h3>Category Distribution</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </section>
+      </div>
+
+      <section class="table-card">
+        <div class="table-head">
+          <div>
+            <p class="eyebrow">All Students Performance</p>
+            <h3>Student Performance Table</h3>
+          </div>
+          <div class="table-toolbar">
+            <input id="studentSearch" type="search" placeholder="Search by roll no or name..." value="${escapeHtml(state.filters.search)}">
+            <div class="toolbar-group">
+              <select id="statusFilter">
+                <option value="all"${state.filters.status === 'all' ? ' selected' : ''}>All Status</option>
+                <option value="pass"${state.filters.status === 'pass' ? ' selected' : ''}>Pass</option>
+                <option value="fail"${state.filters.status === 'fail' ? ' selected' : ''}>Fail</option>
+              </select>
+              <select id="categoryFilter">
+                <option value="all"${state.filters.category === 'all' ? ' selected' : ''}>All Category</option>
+                <option value="Top Performer"${state.filters.category === 'Top Performer' ? ' selected' : ''}>Top Performer</option>
+                <option value="Average Performer"${state.filters.category === 'Average Performer' ? ' selected' : ''}>Average Performer</option>
+                <option value="Weak Student"${state.filters.category === 'Weak Student' ? ' selected' : ''}>Weak Student</option>
+                <option value="Failed"${state.filters.category === 'Failed' ? ' selected' : ''}>Failed</option>
+              </select>
+              <select id="rangeFilter">
+                <option value="all"${state.filters.range === 'all' ? ' selected' : ''}>All Range</option>
+                <option value="0-39"${state.filters.range === '0-39' ? ' selected' : ''}>0-39</option>
+                <option value="40-59"${state.filters.range === '40-59' ? ' selected' : ''}>40-59</option>
+                <option value="60-79"${state.filters.range === '60-79' ? ' selected' : ''}>60-79</option>
+                <option value="80-100"${state.filters.range === '80-100' ? ' selected' : ''}>80-100</option>
+              </select>
+            </div>
+          </div>
+
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Roll No</th>
+                <th>Student Name</th>
+                <th>Marks</th>
+                <th>Percentage</th>
+                <th>Status</th>
+                <th>Category</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredStudents.map((student) => `
+                <tr>
+                  <td>${escapeHtml(student.rank)}</td>
+                  <td>${escapeHtml(student.rollNo)}</td>
+                  <td>${escapeHtml(student.studentName)}</td>
+                  <td>${escapeHtml(student.marks)}</td>
+                  <td>${escapeHtml(formatPercent(student.percentage))}</td>
+                  <td><span class="status-pill ${getStatusClass(student.status)}">${escapeHtml(student.status)}</span></td>
+                  <td><span class="category-pill ${getCategoryClass(student.category)}">${escapeHtml(student.category)}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderInsightSection(title, text, extraClass = '') {
+  return `
+    <article class="insight-card ${extraClass}">
+      <p class="eyebrow">${escapeHtml(title)}</p>
+      <div class="ai-answer">${escapeHtml(text || 'No data yet.').replace(/\n/g, '<br>')}</div>
+    </article>
+  `;
+}
+
+function buildFallbackInsights() {
+  const analytics = state.analytics;
+  if (!analytics) {
+    return {
+      overallSummary: 'Upload a subject file to generate AI insights.',
+      weakStudentAnalysis: 'Weak student analysis will appear after data is uploaded.',
+      recommendations: 'Recommendations will appear after the file is processed.',
+      improvementStrategy: 'Improvement strategy will appear after the file is processed.',
+      actionPlan: 'Action plan will appear after the file is processed.',
+    };
+  }
+
+  const weakStudents = getWeakCount();
+  const passPercentage = Number(analytics.passPercentage) || 0;
+  const averageMarks = Number(analytics.averageMarks) || 0;
+  const highest = Number(analytics.highestMarks) || 0;
+  const lowest = Number(analytics.lowestMarks) || 0;
+
+  let overallSummary = `The overall performance in ${state.currentUpload.subjectName} is moderate with a pass percentage of ${formatPercent(passPercentage)}. The class average is ${formatPercent(averageMarks)}.`;
+  if (passPercentage >= 80) {
+    overallSummary = `The overall performance in ${state.currentUpload.subjectName} is strong with a pass percentage of ${formatPercent(passPercentage)}.`;
+  } else if (passPercentage < 50) {
+    overallSummary = `The overall performance in ${state.currentUpload.subjectName} needs immediate attention because the pass percentage is ${formatPercent(passPercentage)}.`;
+  }
+
+  const weakStudentAnalysis = `${weakStudents} students are in the weak-student range. The gap between the highest mark (${highest}) and lowest mark (${lowest}) should be monitored carefully.`;
+  const recommendations = [
+    'Schedule focused remedial sessions for students below the passing threshold.',
+    'Review topics where average performance is low and add practice exercises.',
+    'Use peer tutoring by pairing top performers with weaker students.',
+    'Run short quizzes to identify concept gaps early.',
+  ].join('\n');
+  const improvementStrategy = `Use the current average (${formatPercent(averageMarks)}) as the baseline and work toward steady gains in the next assessment cycle.`;
+  const actionPlan = [
+    'Shortlist weak students and assign weekly follow-up tasks.',
+    'Meet individually with at-risk students to understand learning blockers.',
+    'Track improvement after each new upload to monitor progress.',
+  ].join('\n');
+
+  return {
+    overallSummary,
+    weakStudentAnalysis,
+    recommendations,
+    improvementStrategy,
+    actionPlan,
+  };
+}
+
+function renderInsightsPage() {
+  const upload = getCurrentUpload();
+  if (!upload || !state.analytics || !state.students.length) {
+    return renderEmptyState(
+      'No AI insights available yet',
+      'Upload a subject file first, then open AI Insights to generate summaries and reports.',
+      'Go to Upload',
+      'upload'
     );
+  }
 
-    state.charts.push(
-        new Chart(document.getElementById('lineChart'), {
-            data: {
-                labels,
-                datasets: [
-                    {
-                        type: 'line',
-                        label: 'Total Percentage',
-                        data: totals,
-                        borderColor: '#ff8a3d',
-                        backgroundColor: 'rgba(255, 138, 61, 0.18)',
-                        fill: true,
-                        tension: 0.35,
-                    },
-                    {
-                        type: 'line',
-                        label: 'Attendance',
-                        data: attendance,
-                        borderColor: '#2ec4b6',
-                        backgroundColor: 'rgba(46, 196, 182, 0.12)',
-                        fill: false,
-                        tension: 0.35,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                animation: chartAnimation,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                    },
-                },
-            },
-        })
+  const analytics = state.analytics;
+  const fallback = buildFallbackInsights();
+  const insights = state.insights || fallback;
+  const weakCount = getWeakCount();
+  const improvementRate = getImprovementRate();
+  const topPerformers = getTopPerformers(5);
+  const trend = getTrendData();
+  const passPercentage = Number(analytics.passPercentage) || 0;
+  const lowestMarks = Number(analytics.lowestMarks) || 0;
+  const highestMarks = Number(analytics.highestMarks) || 0;
+  const averageMarks = Number(analytics.averageMarks) || 0;
+
+  return `
+    <section class="page">
+      <div class="hero-card page-card">
+        <div>
+          <p class="eyebrow">AI Insights &amp; Report Generation</p>
+          <h1 class="page-title">Leverage AI to uncover trends and generate detailed reports.</h1>
+          <p class="page-copy">Subject: ${escapeHtml(upload.subjectName)} | Class: ${escapeHtml(upload.className)}</p>
+        </div>
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" data-generate-insights>Generate Insights</button>
+          <button class="primary-btn" type="button" data-download-report="pdf">Download Full Report</button>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        <article class="summary-card pass"><span class="summary-label">Pass Percentage</span><strong class="summary-value">${escapeHtml(formatPercent(passPercentage))}</strong><span class="summary-note">Current upload</span><span class="summary-accent"></span></article>
+        <article class="summary-card avg"><span class="summary-label">Average Marks</span><strong class="summary-value">${escapeHtml(formatPercent(averageMarks))}</strong><span class="summary-note">Class average</span><span class="summary-accent"></span></article>
+        <article class="summary-card high"><span class="summary-label">Highest Marks</span><strong class="summary-value">${escapeHtml(highestMarks)}</strong><span class="summary-note">Top score</span><span class="summary-accent"></span></article>
+        <article class="summary-card low"><span class="summary-label">Lowest Marks</span><strong class="summary-value">${escapeHtml(lowestMarks)}</strong><span class="summary-note">Lowest score</span><span class="summary-accent"></span></article>
+        <article class="summary-card fail"><span class="summary-label">Students at Risk</span><strong class="summary-value">${escapeHtml(weakCount)}</strong><span class="summary-note">Below 40%</span><span class="summary-accent"></span></article>
+        <article class="summary-card weak"><span class="summary-label">Improvement Rate</span><strong class="summary-value">${escapeHtml(improvementRate)}</strong><span class="summary-note">Compared to prior upload</span><span class="summary-accent"></span></article>
+      </div>
+
+      <div class="section-grid">
+        <section class="chart-card large">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Performance Trend</p>
+              <h3>Track performance improvement over time</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="trendChart"></canvas>
+          </div>
+        </section>
+
+        <section class="chart-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Marks Distribution</p>
+              <h3>Performance by Range</h3>
+            </div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </section>
+
+        <section class="chart-card">
+          <div class="card-head">
+            <div>
+              <p class="eyebrow">Top Performers</p>
+              <h3>Top 5 Students</h3>
+            </div>
+          </div>
+          <div class="stack-list">
+            ${topPerformers.map((student, index) => `
+              <div class="performer-row">
+                <span class="index">${index + 1}</span>
+                <div>
+                  <strong>${escapeHtml(student.studentName)}</strong>
+                  <p style="margin:0;color:var(--muted);">Roll No ${escapeHtml(student.rollNo)}</p>
+                </div>
+                <strong>${escapeHtml(Number(student.marks) || 0)}</strong>
+              </div>
+            `).join('')}
+          </div>
+        </section>
+      </div>
+
+      <div class="report-grid">
+        <section class="insight-card large">
+          <p class="eyebrow">Ask Doubts or Query</p>
+          <h3>Ask any question about your data and get instant AI-powered answers.</h3>
+          <form id="queryForm" class="ai-query">
+            <input id="queryInput" type="text" placeholder="Which topics do students find most difficult?">
+            <button class="primary-btn" type="button" data-query-submit>Generate Answer</button>
+          </form>
+          <div class="ai-answer" id="queryAnswer">${escapeHtml(state.queryReply || 'Ask a question to generate a tailored reply.').replace(/\n/g, '<br>')}</div>
+        </section>
+
+        <section class="insight-card">
+          <p class="eyebrow">Top Strengths</p>
+          <h3>What is going well</h3>
+          <div class="tag-list">
+            <span class="tag">Strong passes in the current upload</span>
+            <span class="tag">Top performers are clearly identified</span>
+            <span class="tag">Analytics are stored in MongoDB</span>
+            <span class="tag">Reports can be exported in multiple formats</span>
+          </div>
+        </section>
+
+        <section class="insight-card">
+          <p class="eyebrow">Areas for Improvement</p>
+          <h3>Where to focus next</h3>
+          <div class="tag-list">
+            <span class="tag">Support weak students with revision sessions</span>
+            <span class="tag">Review low-scoring subjects after each upload</span>
+            <span class="tag">Track progress against previous uploads</span>
+            <span class="tag">Share actionable feedback with teachers</span>
+          </div>
+        </section>
+
+        <section class="insight-card">
+          <p class="eyebrow">Report Generation</p>
+          <h3>Download files for submission</h3>
+          <div class="report-options">
+            <select id="reportTypeSelect">
+              <option value="pdf">PDF Report</option>
+              <option value="excel">Excel Report</option>
+              <option value="csv">CSV Report</option>
+            </select>
+            <button class="primary-btn report-btn" type="button" data-download-selected-report>Download Selected Report</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="page-card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">AI Insights</p>
+            <h3>Structured summary</h3>
+            <p>The cards below combine the generated AI insights and a safe fallback summary.</p>
+          </div>
+          <div class="badge-row">
+            <span class="badge">Trend lines from history</span>
+            <span class="badge">Local fallback ready</span>
+          </div>
+        </div>
+
+        <div class="insight-grid">
+          ${renderInsightSection('Overall Summary', insights.overallSummary || fallback.overallSummary || '')}
+          ${renderInsightSection('Weak Student Analysis', insights.weakStudentAnalysis || fallback.weakStudentAnalysis || '')}
+          ${renderInsightSection('Teacher Recommendations', insights.recommendations || fallback.recommendations || '')}
+          ${renderInsightSection('Improvement Strategy', insights.improvementStrategy || fallback.improvementStrategy || '')}
+          ${renderInsightSection('Academic Action Plan', insights.actionPlan || fallback.actionPlan || '', 'full')}
+        </div>
+
+        <div class="page-card" style="margin-top:1rem;background:linear-gradient(180deg,#f8fbff,#fff);">
+          <p class="eyebrow">AI Disclaimer</p>
+          <p class="page-copy">Insights are generated using the uploaded data. Please review the results alongside your own teaching expertise before making decisions.</p>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderHistoryPage() {
+  if (!state.history.length) {
+    return renderEmptyState(
+      'No uploads yet',
+      'Your upload history will appear here after the first subject file is processed.',
+      'Go to Upload',
+      'upload'
     );
+  }
+
+  return `
+    <section class="page">
+      <div class="hero-card page-card">
+        <div>
+          <p class="eyebrow">Upload History</p>
+          <h1 class="page-title">Store every analysis</h1>
+          <p class="page-copy">Use history to reopen analytics, download reports, or remove old uploads.</p>
+        </div>
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" data-view="upload">Upload New File</button>
+        </div>
+      </div>
+
+      <section class="history-card">
+        <div class="table-head">
+          <div>
+            <p class="eyebrow">Saved Uploads</p>
+            <h3>All processed subject files</h3>
+          </div>
+          <span class="badge">${state.history.length} uploads</span>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Upload Date</th>
+              <th>Subject</th>
+              <th>Class</th>
+              <th>Student Count</th>
+              <th>Average</th>
+              <th>Pass %</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.history.map((upload) => `
+              <tr>
+                <td>${escapeHtml(formatDate(upload.uploadDate))}</td>
+                <td>${escapeHtml(upload.subjectName)}</td>
+                <td>${escapeHtml(upload.className)}</td>
+                <td>${escapeHtml(upload.studentCount ?? upload.analytics?.totalStudents ?? 0)}</td>
+                <td>${escapeHtml(formatPercent(upload.analytics?.averageMarks || 0))}</td>
+                <td>${escapeHtml(formatPercent(upload.analytics?.passPercentage || 0))}</td>
+                <td>
+                  <div class="history-actions">
+                    <button class="mini-btn" type="button" data-history-action="view" data-upload-id="${escapeHtml(upload._id)}">View Analytics</button>
+                    <button class="mini-btn" type="button" data-history-action="pdf" data-upload-id="${escapeHtml(upload._id)}">PDF</button>
+                    <button class="mini-btn" type="button" data-history-action="excel" data-upload-id="${escapeHtml(upload._id)}">Excel</button>
+                    <button class="mini-btn" type="button" data-history-action="csv" data-upload-id="${escapeHtml(upload._id)}">CSV</button>
+                    <button class="mini-btn danger-btn" type="button" data-history-action="delete" data-upload-id="${escapeHtml(upload._id)}">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </section>
+    </section>
+  `;
 }
 
-function getApiUrl(pathname, semester = getSelectedSemester()) {
-    const url = new URL(pathname, window.location.origin);
-    if (semester) {
-        url.searchParams.set('semester', semester);
-    }
-    return url.pathname + url.search;
+function renderProfilePage() {
+  if (!state.profile) {
+    return renderEmptyState(
+      'Profile not loaded',
+      'Log in again or refresh the page so we can load your profile details from MongoDB.',
+      'Refresh App',
+      'upload'
+    );
+  }
+
+  const profile = state.profile;
+  const stats = state.profileStats || {};
+  const joinedDate = profile.createdAt || profile.updatedAt || new Date();
+
+  return `
+    <section class="page">
+      <div class="hero-card page-card">
+        <div>
+          <p class="eyebrow">Profile</p>
+          <h1 class="page-title">${escapeHtml(profile.fullName)}</h1>
+          <p class="page-copy">${escapeHtml(profile.email)} | ${escapeHtml(profile.role || 'teacher')}</p>
+        </div>
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" data-view="history">Open Upload History</button>
+        </div>
+      </div>
+
+      <div class="profile-grid">
+        <article class="profile-card">
+          <p class="eyebrow">Teacher Details</p>
+          <strong>${escapeHtml(profile.fullName)}</strong>
+          <p>${escapeHtml(profile.email)}</p>
+          <div class="profile-tag">Joined ${escapeHtml(formatDate(joinedDate))}</div>
+        </article>
+
+        <article class="profile-card">
+          <p class="eyebrow">Access Level</p>
+          <strong>${escapeHtml(profile.role || 'teacher')}</strong>
+          <p>You can upload a single subject file, review analytics, and export reports.</p>
+          <div class="profile-tag">Protected by JWT</div>
+        </article>
+
+        <article class="profile-card">
+          <span class="profile-stat">
+            <span>Total Uploads</span>
+            <strong>${escapeHtml(stats.totalUploads ?? state.history.length ?? 0)}</strong>
+          </span>
+        </article>
+
+        <article class="profile-card">
+          <span class="profile-stat">
+            <span>Total Reports</span>
+            <strong>${escapeHtml(stats.totalReports ?? 0)}</strong>
+          </span>
+        </article>
+      </div>
+    </section>
+  `;
 }
 
-function getModulePath(type) {
-    const module = moduleConfig[type];
-    if (!module) {
-        return '';
-    }
+function renderPage() {
+  if (!pageHost) {
+    return;
+  }
 
-    const url = new URL(module.path, window.location.origin);
-    url.searchParams.set('semester', getSelectedSemester());
-    return `${url.pathname}${url.search}`;
+  const renderMap = {
+    upload: renderUploadPage,
+    dashboard: renderDashboardPage,
+    insights: renderInsightsPage,
+    history: renderHistoryPage,
+    profile: renderProfilePage,
+    processing: renderProcessingPage,
+  };
+
+  const template = renderMap[state.view] || renderUploadPage;
+  pageHost.innerHTML = template();
+
+  if (state.view === 'dashboard' || state.view === 'insights') {
+    requestAnimationFrame(() => renderCharts());
+  }
 }
 
-function updateModuleUrlSemester() {
-    if (document.body.dataset.page !== 'module') {
-        return;
-    }
-
-    const url = new URL(window.location.href);
-    url.searchParams.set('semester', getSelectedSemester());
-    window.history.replaceState({}, '', url);
+async function loadProfile() {
+  const response = await requestJson('/api/profile');
+  state.profile = response.user;
+  return response.user;
 }
 
-async function loadSemesters() {
-    const data = await fetchJson('/api/semesters');
-    state.semesters = data.semesters?.length ? data.semesters : [data.defaultSemester || 'Semester 1'];
-    state.subjectsBySemester = data.subjectsBySemester || {};
-
-    const requestedSemester = new URLSearchParams(window.location.search).get('semester');
-    if (!state.selectedSemester || !state.semesters.includes(state.selectedSemester)) {
-        state.selectedSemester = state.semesters.includes(requestedSemester)
-            ? requestedSemester
-            : state.semesters[0];
-    }
-
-    localStorage.setItem('tbp-semester', state.selectedSemester);
-    syncSemesterControls();
-    updateModuleUrlSemester();
+async function loadProfileStats() {
+  const response = await requestJson('/api/profile/stats');
+  state.profileStats = {
+    totalUploads: response.totalUploads || 0,
+    totalReports: response.totalReports || 0,
+  };
+  return state.profileStats;
 }
 
-async function handleSemesterChange(nextSemester) {
-    if (!nextSemester || nextSemester === state.selectedSemester) {
-        return;
+async function loadHistory() {
+  const response = await requestJson('/api/uploads');
+  state.history = Array.isArray(response.uploads) ? response.uploads : [];
+  if (state.currentUploadId) {
+    const selected = state.history.find((upload) => String(upload._id) === String(state.currentUploadId));
+    if (selected) {
+      sessionStorage.setItem(STORAGE_KEYS.currentUploadId, selected._id);
     }
-
-    state.selectedSemester = nextSemester;
-    localStorage.setItem('tbp-semester', nextSemester);
-    setStudentPageForSemester(nextSemester, 1);
-    syncSemesterControls();
-    updateModuleUrlSemester();
-    await refreshData(true);
+  }
+  return state.history;
 }
 
-function attachSubjectCalculator() {
-    const form = document.getElementById('studentForm');
-    const calculatedTotal = document.getElementById('calculatedTotal');
-    if (!form || !calculatedTotal) {
-        return;
-    }
+async function loadUploadData(uploadId) {
+  if (!uploadId) {
+    return null;
+  }
 
-    if (form.dataset.subjectCalculatorAttached === 'true') {
-        updateCalculatedTotalDisplay(form);
-        return;
-    }
+  const [uploadResponse, studentsResponse] = await Promise.all([
+    requestJson(`/api/uploads/${encodeURIComponent(uploadId)}`),
+    requestJson(`/api/students/${encodeURIComponent(uploadId)}?limit=500`),
+  ]);
 
-    form.addEventListener('input', (event) => {
-        if (event.target?.name?.startsWith('subject_')) {
-            updateCalculatedTotalDisplay(form);
-        }
-    });
-
-    form.elements.Semester?.addEventListener('change', (event) => {
-        updateSubjectFieldsForSemester(event.currentTarget.value);
-    });
-
-    form.dataset.subjectCalculatorAttached = 'true';
-    updateSubjectFieldsForSemester(form.elements.Semester?.value || getSelectedSemester());
+  state.currentUpload = uploadResponse.upload;
+  state.analytics = uploadResponse.analytics;
+  state.students = Array.isArray(studentsResponse.students) ? studentsResponse.students : [];
+  state.currentUploadId = uploadId;
+  sessionStorage.setItem(STORAGE_KEYS.currentUploadId, uploadId);
+  state.insights = null;
+  state.queryReply = '';
+  return uploadResponse.upload;
 }
 
-function updateCalculatedTotalDisplay(form) {
-    const calculatedTotal = document.getElementById('calculatedTotal');
-    if (!form || !calculatedTotal) {
-        return;
-    }
+async function ensureInsights(force = false) {
+  const uploadId = getCurrentUploadId();
+  if (!uploadId) {
+    return null;
+  }
 
-    const payload = buildPayloadFromForm(form);
-    calculatedTotal.textContent = calculateTotalPercentage(payload.Subjects);
+  if (!force && state.insights) {
+    return state.insights;
+  }
+
+  try {
+    const existing = await requestJson(`/api/ai-insights/${encodeURIComponent(uploadId)}`);
+    state.insights = existing.insights || null;
+  } catch (error) {
+    if (force || String(error.message).toLowerCase().includes('not found')) {
+      const generated = await requestJson(`/api/ai-insights/${encodeURIComponent(uploadId)}`, { method: 'POST' });
+      state.insights = generated.insights || null;
+    } else {
+      throw error;
+    }
+  }
+
+  if (state.view === 'insights') {
+    renderPage();
+  }
+
+  return state.insights;
 }
 
-function attachImportSemesterHint() {
-    const form = document.getElementById('importForm');
-    if (!form) {
-        return;
+function startProcessing(fileName, fileSize) {
+  if (state.processing.timer) {
+    clearInterval(state.processing.timer);
+  }
+
+  state.processing = {
+    active: true,
+    progress: 8,
+    step: 1,
+    message: 'Preparing upload...',
+    fileName,
+    fileSize,
+    timer: null,
+  };
+  state.view = 'processing';
+  renderSidebar();
+  renderPage();
+
+  state.processing.timer = setInterval(() => {
+    if (!state.processing.active) {
+      return;
     }
 
-    const semesterSelect = form.elements.semester;
-    if (form.dataset.subjectHintAttached !== 'true') {
-        semesterSelect?.addEventListener('change', (event) => {
-            updateImportTip(event.currentTarget.value);
-        });
-        form.dataset.subjectHintAttached = 'true';
-    }
+    const progress = state.processing.progress;
+    let increment = 6;
+    if (progress < 25) increment = 8;
+    if (progress < 60) increment = 5;
+    if (progress < 85) increment = 3;
+    state.processing.progress = Math.min(95, progress + increment);
 
-    updateImportTip(semesterSelect?.value || getSelectedSemester());
+    if (state.processing.progress < 25) state.processing.message = 'File uploaded successfully.';
+    else if (state.processing.progress < 55) state.processing.message = 'Validating file structure.';
+    else if (state.processing.progress < 85) state.processing.message = 'Calculating analytics and rankings.';
+    else state.processing.message = 'Storing data and preparing the dashboard.';
+
+    renderPage();
+  }, 320);
 }
 
-function showModule(type) {
-    const module = moduleConfig[type];
-    if (!module) {
-        return;
-    }
+function completeProcessing(message = 'Analytics generated successfully.') {
+  if (state.processing.timer) {
+    clearInterval(state.processing.timer);
+    state.processing.timer = null;
+  }
 
-    if (document.body.dataset.page !== 'module') {
-        window.location.href = getModulePath(type);
-        return;
-    }
-
-    const title = document.getElementById('moduleTitle');
-    const content = document.getElementById('moduleContent');
-    const moduleView = document.getElementById('moduleView');
-
-    moduleView.classList.remove('hidden', 'module-exit');
-    moduleView.classList.add('module-enter');
-    setFeedback('');
-    title.textContent = module.title;
-
-    content.innerHTML = moduleTemplates[type]();
-    applyMotion(content);
-
-    if (type === 'visuals') {
-        renderCharts();
-    }
-
-    if (type === 'add') {
-        document.getElementById('studentForm').addEventListener('submit', submitStudentForm);
-        document.getElementById('importForm').addEventListener('submit', submitImportForm);
-        attachSubjectCalculator();
-        attachImportSemesterHint();
-    }
-
-    if (type === 'subjects') {
-        content.querySelectorAll('[data-student-page]').forEach((button) => {
-            button.addEventListener('click', () => {
-                setStudentPageForSemester(getSelectedSemester(), Number(button.dataset.studentPage));
-                showModule('subjects');
-            });
-        });
-    }
-}
-
-function showHome() {
-    if (document.body.dataset.page === 'module') {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    destroyCharts();
-    setFeedback('');
-    const moduleView = document.getElementById('moduleView');
-    moduleView.classList.remove('module-enter');
-    moduleView.classList.add('module-exit');
-    setTimeout(() => {
-        document.getElementById('homeGrid').classList.remove('hidden');
-        moduleView.classList.add('hidden');
-    }, 220);
-}
-
-async function refreshData(showMessage = false) {
-    try {
-        if (!state.semesters.length) {
-            await loadSemesters();
-        }
-
-        const [students, stats] = await Promise.all([
-            fetchJson(getApiUrl('/api/students')),
-            fetchJson(getApiUrl('/api/stats')),
-        ]);
-
-        state.students = students;
-        state.stats = stats;
-        updateDashboardStats();
-        updateSemesterLabels();
-
-        if (document.body.dataset.page === 'module') {
-            const currentModule = new URLSearchParams(window.location.search).get('module') || 'visuals';
-            showModule(currentModule);
-        }
-
-        if (showMessage) {
-            setFeedback(`Dashboard data refreshed for ${getSelectedSemester()}.`, 'success');
-        }
-    } catch (error) {
-        setFeedback(error.message, 'error');
-    }
-}
-
-async function submitStudentForm(event) {
-    event.preventDefault();
-
-    const form = event.currentTarget;
-    const payload = buildPayloadFromForm(form);
-
-    try {
-        await fetchJson('/api/students', {
-            method: 'POST',
-            body: JSON.stringify(payload),
-        });
-
-        if (!state.semesters.includes(payload.Semester)) {
-            state.semesters.push(payload.Semester);
-            state.semesters.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
-            syncSemesterControls();
-        }
-
-        form.reset();
-        attachSubjectCalculator();
-
-        if (payload.Semester === getSelectedSemester()) {
-            await refreshData();
-        } else {
-            await handleSemesterChange(payload.Semester);
-        }
-        setFeedback(`Semester result with subject marks added successfully for ${payload.Semester}.`, 'success');
-    } catch (error) {
-        setFeedback(error.message, 'error');
-    }
-}
-
-async function submitImportForm(event) {
-    event.preventDefault();
-
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-    const semester = formData.get('semester');
-
-    try {
-        const result = await fetchJson('/api/import-students', {
-            method: 'POST',
-            body: formData,
-        });
-
-        if (!state.semesters.includes(semester)) {
-            state.semesters.push(semester);
-            state.semesters.sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' }));
-            syncSemesterControls();
-        }
-
-        form.reset();
-
-        if (semester === getSelectedSemester()) {
-            await refreshData();
-        } else {
-            await handleSemesterChange(semester);
-        }
-
-        const summary = [`Imported ${result.importedCount} student record(s) into ${semester}.`];
-        if (result.rejectedCount) {
-            summary.push(`${result.rejectedCount} record(s) were skipped.`);
-        }
-
-        setFeedback(summary.join(' '), result.rejectedCount ? 'info' : 'success');
-    } catch (error) {
-        setFeedback(error.message, 'error');
-    }
+  state.processing.active = false;
+  state.processing.progress = 100;
+  state.processing.step = 4;
+  state.processing.message = message;
+  renderPage();
 }
 
 async function handleLogin(event) {
-    event.preventDefault();
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const email = String(formData.get('email') || '').trim();
+  const password = String(formData.get('password') || '');
+  const rememberMe = Boolean(formData.get('rememberMe'));
 
-    const form = event.currentTarget;
-    const payload = Object.fromEntries(new FormData(form).entries());
+  if (!email || !password) {
+    setAuthFeedback('Please enter both email and password.', 'error', 'login');
+    return;
+  }
+
+  try {
+    const response = await requestJson('/api/login', {
+      method: 'POST',
+      body: { email, password },
+      headers: {},
+    });
+
+    state.rememberEmail = rememberMe ? email : '';
+    if (rememberMe) {
+      localStorage.setItem(STORAGE_KEYS.rememberEmail, email);
+    } else {
+      localStorage.removeItem(STORAGE_KEYS.rememberEmail);
+    }
+
+    setSession(response.user, response.token);
+    renderTeacherChip();
+    showApp();
+    state.view = 'upload';
+    topbarTitle.textContent = PAGE_META.upload.title;
+    topbarSubtitle.textContent = PAGE_META.upload.subtitle;
+    renderSidebar();
+    renderPage();
+
+    await Promise.allSettled([loadProfile(), loadProfileStats(), loadHistory()]);
+    setAuthFeedback('Login successful. You can now upload a subject file.', 'success', 'login');
+
+    if (state.history.length && !state.currentUploadId) {
+      const latest = state.history[0];
+      if (latest?._id) {
+        state.currentUploadId = String(latest._id);
+        sessionStorage.setItem(STORAGE_KEYS.currentUploadId, state.currentUploadId);
+        await loadUploadData(state.currentUploadId);
+        renderPage();
+      }
+    }
+  } catch (error) {
+    setAuthFeedback(error.message, 'error', 'login');
+  }
+}
+
+async function handleSignup(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const fullName = String(formData.get('fullName') || '').trim();
+  const email = String(formData.get('email') || '').trim();
+  const password = String(formData.get('password') || '');
+  const confirmPassword = String(formData.get('confirmPassword') || '');
+
+  if (password !== confirmPassword) {
+    setAuthFeedback('Passwords do not match.', 'error', 'signup');
+    return;
+  }
+
+  try {
+    await requestJson('/api/signup', {
+      method: 'POST',
+      body: {
+        fullName,
+        email,
+        password,
+        confirmPassword,
+      },
+      headers: {},
+    });
+
+    form.reset();
+    setAuthMode('login');
+    const loginEmail = document.querySelector('#loginForm input[name="email"]');
+    if (loginEmail) {
+      loginEmail.value = email;
+    }
+    setAuthFeedback('Account created successfully. Please log in with your email and password.', 'success', 'login');
+  } catch (error) {
+    setAuthFeedback(error.message, 'error', 'signup');
+  }
+}
+
+async function submitUploadForm(form) {
+  if (!state.token) {
+    showAuth();
+    return;
+  }
+
+  if (!form.reportValidity()) {
+    return;
+  }
+
+  const formData = new FormData(form);
+  const fileInput = form.querySelector('input[name="file"]');
+  const file = fileInput?.files?.[0];
+
+  if (!file) {
+    const feedback = document.getElementById('uploadFeedback');
+    if (feedback) {
+      feedback.textContent = 'Please choose a marks file first.';
+      feedback.className = 'inline-feedback error';
+      feedback.classList.remove('hidden');
+    }
+    return;
+  }
+
+  const startedAt = Date.now();
+  startProcessing(file.name, file.size);
+
+  try {
+    const response = await requestJson('/api/upload', {
+      method: 'POST',
+      body: formData,
+      headers: {},
+    });
+
+    state.processing.message = 'File verified successfully. Preparing analytics dashboard...';
+    renderPage();
+
+    const visibleWait = Math.max(900, 1600 - (Date.now() - startedAt));
+    if (visibleWait > 0) {
+      await delay(visibleWait);
+    }
+
+    await loadHistory();
+    await loadUploadData(response.uploadId);
+    completeProcessing('File verified successfully. Redirecting to dashboard...');
+
+    await delay(650);
+    setView('dashboard');
+  } catch (error) {
+    completeProcessing(error.message || 'Upload failed.');
+    const detailLines = formatErrorDetails(error.details);
+    const feedbackHtml = [error.message, ...detailLines]
+      .filter(Boolean)
+      .map((line) => `<div>${escapeHtml(line)}</div>`)
+      .join('');
+    state.processing.message = error.message;
+    renderPage();
+    await delay(1200);
+    state.view = 'upload';
+    renderPage();
+    const feedback = document.getElementById('uploadFeedback');
+    if (feedback) {
+      feedback.innerHTML = feedbackHtml;
+      feedback.className = 'inline-feedback error';
+      feedback.classList.remove('hidden');
+    }
+  }
+}
+
+async function handleUpload(event) {
+  event.preventDefault();
+  await submitUploadForm(event.currentTarget);
+}
+
+function updateSelectedFileLabel(file) {
+  const label = document.getElementById('selectedFileMeta');
+  if (!label) {
+    return;
+  }
+
+  if (file) {
+    const size = Math.max(1, Math.round(file.size / 1024));
+    label.textContent = `${file.name} • ${size} KB`;
+  } else {
+    label.textContent = 'No file selected yet.';
+  }
+}
+
+async function handleSidebarClick(event) {
+  const chooseFileButton = event.target.closest('#chooseFileBtn');
+  if (chooseFileButton) {
+    const marksFileInput = document.getElementById('marksFile');
+    marksFileInput?.click();
+    return;
+  }
+
+  const uploadSubmitButton = event.target.closest('[data-upload-submit]');
+  if (uploadSubmitButton) {
+    const uploadForm = document.getElementById('uploadForm');
+    if (uploadForm) {
+      await submitUploadForm(uploadForm);
+    }
+    return;
+  }
+
+  const querySubmitButton = event.target.closest('[data-query-submit]');
+  if (querySubmitButton) {
+    const queryForm = document.getElementById('queryForm');
+    if (queryForm) {
+      await submitQueryForm(queryForm);
+    }
+    return;
+  }
+
+  const viewButton = event.target.closest('[data-view]');
+  if (viewButton) {
+    const view = viewButton.dataset.view;
+    if (view === 'dashboard' || view === 'insights' || view === 'history' || view === 'profile' || view === 'upload') {
+      setView(view);
+    }
+    closeSidebar();
+    return;
+  }
+
+  const downloadButton = event.target.closest('[data-download-report]');
+  if (downloadButton) {
+    const format = downloadButton.dataset.downloadReport;
+    await downloadCurrentReport(format);
+    return;
+  }
+
+  const selectedReportButton = event.target.closest('[data-download-selected-report]');
+  if (selectedReportButton) {
+    const select = document.getElementById('reportTypeSelect');
+    const format = select?.value || 'pdf';
+    await downloadCurrentReport(format);
+    return;
+  }
+
+  const generateInsightsButton = event.target.closest('[data-generate-insights]');
+  if (generateInsightsButton) {
+    try {
+      await ensureInsights(true);
+      setView('insights');
+    } catch (error) {
+      alert(error.message);
+    }
+    return;
+  }
+
+  const historyAction = event.target.closest('[data-history-action]');
+  if (historyAction) {
+    const action = historyAction.dataset.historyAction;
+    const uploadId = historyAction.dataset.uploadId;
+    if (!uploadId) {
+      return;
+    }
+
+    if (action === 'view') {
+      await openHistoryUpload(uploadId);
+      return;
+    }
+    if (action === 'delete') {
+      await deleteHistoryUpload(uploadId);
+      return;
+    }
+    await downloadReport(uploadId, action);
+    return;
+  }
+
+  const queryButton = event.target.closest('#queryForm button[type="submit"]');
+  if (queryButton) {
+    return;
+  }
+}
+
+async function openHistoryUpload(uploadId) {
+  await loadUploadData(uploadId);
+  state.queryReply = '';
+  state.insights = null;
+  setView('dashboard');
+  await Promise.allSettled([ensureInsights(false)]);
+}
+
+async function deleteHistoryUpload(uploadId) {
+  const confirmed = window.confirm('Delete this upload and all related analytics?');
+  if (!confirmed) {
+    return;
+  }
+
+  await requestJson(`/api/uploads/${encodeURIComponent(uploadId)}`, {
+    method: 'DELETE',
+    headers: {},
+  });
+
+  await loadHistory();
+
+  if (String(state.currentUploadId) === String(uploadId)) {
+    state.currentUploadId = '';
+    state.currentUpload = null;
+    state.analytics = null;
+    state.students = [];
+    state.insights = null;
+    sessionStorage.removeItem(STORAGE_KEYS.currentUploadId);
+  }
+
+  if (state.view === 'history') {
+    renderPage();
+  } else if (!state.currentUploadId) {
+    setView('upload');
+  }
+}
+
+async function downloadReport(uploadId, format) {
+  if (!uploadId) {
+    return;
+  }
+
+  const normalizedFormat = ['pdf', 'excel', 'csv'].includes(format) ? format : 'pdf';
+  const filename = `${state.currentUpload?.subjectName || 'report'}-${normalizedFormat}.${normalizedFormat === 'excel' ? 'xlsx' : normalizedFormat}`;
+  await requestBlob(`/api/reports/${encodeURIComponent(uploadId)}/${normalizedFormat}`, filename);
+}
+
+async function downloadCurrentReport(format) {
+  const uploadId = getCurrentUploadId();
+  if (!uploadId) {
+    alert('Upload a subject file first.');
+    return;
+  }
+
+  await downloadReport(uploadId, format);
+}
+
+function getInsightAnswer(question) {
+  const lower = question.toLowerCase();
+  const students = state.students;
+  const topStudents = getTopPerformers(3);
+  const weakStudents = getWeakStudents(3);
+  const analytics = state.analytics || {};
+  const fallback = buildFallbackInsights();
+
+  if (lower.includes('weak') || lower.includes('risk') || lower.includes('low')) {
+    if (!weakStudents.length) {
+      return 'There are no weak students in the current upload. Every student is above the weak-student threshold.';
+    }
+    return `Weak students: ${weakStudents.map((student) => `${student.studentName} (${student.rollNo}, ${formatPercent(student.percentage)})`).join('; ')}. Focus on revision sessions and one-on-one guidance.`;
+  }
+
+  if (lower.includes('top') || lower.includes('best') || lower.includes('highest')) {
+    return `Top performers: ${topStudents.map((student) => `${student.studentName} (${student.rollNo}, ${formatPercent(student.percentage)})`).join('; ')}. Encourage peer mentoring and advanced practice.`;
+  }
+
+  if (lower.includes('pass') || lower.includes('fail')) {
+    return `Pass/fail summary: ${analytics.passedStudents || 0} passed and ${analytics.failedStudents || 0} failed out of ${analytics.totalStudents || students.length || 0} students. Pass percentage is ${formatPercent(analytics.passPercentage || 0)}.`;
+  }
+
+  if (lower.includes('average') || lower.includes('mean')) {
+    return `The class average is ${formatPercent(analytics.averageMarks || 0)}. The highest mark is ${analytics.highestMarks ?? 0} and the lowest mark is ${analytics.lowestMarks ?? 0}.`;
+  }
+
+  return state.insights?.overallSummary || fallback.overallSummary;
+}
+
+async function submitQueryForm(form) {
+  const input = form?.querySelector('#queryInput');
+  const answer = document.getElementById('queryAnswer');
+  const question = String(input?.value || '').trim();
+  if (!question) {
+    if (answer) {
+      answer.textContent = 'Please type a question first.';
+    }
+    return;
+  }
+
+  const response = getInsightAnswer(question);
+  state.queryReply = response;
+  if (answer) {
+    answer.innerHTML = escapeHtml(response).replace(/\n/g, '<br>');
+  }
+}
+
+function openSidebar() {
+  sidebar?.classList.add('open');
+  sidebarBackdrop?.classList.remove('hidden');
+  state.sidebarOpen = true;
+}
+
+function closeSidebar() {
+  sidebar?.classList.remove('open');
+  sidebarBackdrop?.classList.add('hidden');
+  state.sidebarOpen = false;
+}
+
+async function initializeApp() {
+  attachPasswordVisibilityToggles();
+  setAuthMode('login');
+  applyRememberedEmail();
+  renderTeacherChip();
+
+  const loginForm = document.getElementById('loginForm');
+  const signupForm = document.getElementById('signupForm');
+  const logoutBtn = document.getElementById('logoutBtn');
+  const sidebarToggle = document.getElementById('sidebarToggle');
+  const loginSwitchButtons = document.querySelectorAll('[data-switch-auth]');
+  const forgotPasswordButtons = document.querySelectorAll('[data-forgot-password]');
+
+  loginForm?.addEventListener('submit', handleLogin);
+  signupForm?.addEventListener('submit', handleSignup);
+  logoutBtn?.addEventListener('click', handleLogout);
+  sidebar?.addEventListener('click', handleSidebarClick);
+  sidebarToggle?.addEventListener('click', () => {
+    if (state.view === 'processing') {
+      setView('upload');
+      return;
+    }
+
+    if (state.sidebarOpen) {
+      closeSidebar();
+    } else {
+      openSidebar();
+    }
+  });
+  sidebarBackdrop?.addEventListener('click', closeSidebar);
+
+  loginSwitchButtons.forEach((button) => {
+    button.addEventListener('click', () => setAuthMode(button.dataset.switchAuth));
+  });
+
+  forgotPasswordButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      setAuthFeedback('Please use the demo login or sign up with your email to create a new account.', 'info', 'login');
+      setAuthMode('login');
+    });
+  });
+
+  pageHost.addEventListener('click', handleSidebarClick);
+  pageHost.addEventListener('dragover', (event) => {
+    const dropZone = event.target.closest('#dropZone');
+    if (!dropZone) {
+      return;
+    }
+    event.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+  pageHost.addEventListener('dragleave', (event) => {
+    const dropZone = event.target.closest('#dropZone');
+    if (dropZone) {
+      dropZone.classList.remove('dragover');
+    }
+  });
+  pageHost.addEventListener('drop', (event) => {
+    const dropZone = event.target.closest('#dropZone');
+    if (!dropZone) {
+      return;
+    }
+    event.preventDefault();
+    dropZone.classList.remove('dragover');
+    const marksFileInput = document.getElementById('marksFile');
+    if (event.dataTransfer?.files?.length && marksFileInput) {
+      marksFileInput.files = event.dataTransfer.files;
+      updateSelectedFileLabel(marksFileInput.files[0]);
+    }
+  });
+  pageHost.addEventListener('keydown', async (event) => {
+    if (event.target.matches('#queryInput') && event.key === 'Enter') {
+      event.preventDefault();
+      const queryForm = document.getElementById('queryForm');
+      if (queryForm) {
+        await submitQueryForm(queryForm);
+      }
+    }
+  });
+  pageHost.addEventListener('submit', async (event) => {
+    if (event.target.id === 'uploadForm') {
+      await handleUpload(event);
+      return;
+    }
+    if (event.target.id === 'queryForm') {
+      event.preventDefault();
+      await submitQueryForm(event.target);
+    }
+  });
+
+  pageHost.addEventListener('input', (event) => {
+    if (event.target.matches('#studentSearch')) {
+      state.filters.search = event.target.value;
+      renderPage();
+      return;
+    }
+  });
+
+  pageHost.addEventListener('change', (event) => {
+    if (event.target.matches('#marksFile')) {
+      updateSelectedFileLabel(event.target.files?.[0] || null);
+      const feedback = document.getElementById('uploadFeedback');
+      if (feedback) {
+        feedback.textContent = '';
+        feedback.className = 'inline-feedback hidden';
+      }
+      return;
+    }
+    if (event.target.matches('#statusFilter')) {
+      state.filters.status = event.target.value;
+      renderPage();
+      return;
+    }
+    if (event.target.matches('#categoryFilter')) {
+      state.filters.category = event.target.value;
+      renderPage();
+      return;
+    }
+    if (event.target.matches('#rangeFilter')) {
+      state.filters.range = event.target.value;
+      renderPage();
+      return;
+    }
+    if (event.target.matches('#reportTypeSelect')) {
+      return;
+    }
+  });
+
+  if (state.token) {
+    showApp();
+    state.view = 'upload';
+    renderSidebar();
+    renderPage();
 
     try {
-        await fetchJson('/api/login', {
-            method: 'POST',
-            body: JSON.stringify(payload),
-        });
+      await Promise.allSettled([loadProfile(), loadProfileStats(), loadHistory()]);
+      renderTeacherChip();
+      renderPage();
 
-        sessionStorage.setItem('tbp-auth', 'true');
-        state.isLoggedIn = true;
-        setLoginFeedback('');
-        form.reset();
-        await bootApp();
+      if (state.currentUploadId) {
+        await loadUploadData(state.currentUploadId);
+        renderPage();
+      }
     } catch (error) {
-        setLoginFeedback(error.message, 'error');
+      clearSession();
+      showAuth();
+      setAuthFeedback(error.message || 'Please log in again.', 'error', 'login');
     }
+  } else {
+    showAuth();
+    renderPage();
+  }
+
+  renderTeacherChip();
 }
 
-function logout() {
-    sessionStorage.removeItem('tbp-auth');
-    state.isLoggedIn = false;
-    destroyCharts();
-    setFeedback('');
-
-    if (document.body.dataset.page === 'module') {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    document.getElementById('appShell').classList.add('hidden');
-    document.getElementById('moduleView').classList.add('hidden');
-    document.getElementById('homeGrid').classList.remove('hidden');
-    document.getElementById('loginScreen').classList.remove('hidden');
-    setLoginFeedback('');
+async function handleLogout() {
+  clearSession();
+  closeSidebar();
+  showAuth();
+  state.view = 'login';
+  state.processing.active = false;
+  if (state.processing.timer) {
+    clearInterval(state.processing.timer);
+    state.processing.timer = null;
+  }
+  state.filters = {
+    search: '',
+    status: 'all',
+    category: 'all',
+    range: 'all',
+  };
+  setAuthMode('login');
+  applyRememberedEmail();
 }
 
-async function bootApp() {
-    if (document.body.dataset.page === 'module' && !state.isLoggedIn) {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    const loginScreen = document.getElementById('loginScreen');
-    if (loginScreen) {
-        loginScreen.classList.add('hidden');
-    }
-
-    const appShell = document.getElementById('appShell');
-    if (appShell) {
-        appShell.classList.remove('hidden');
-    }
-
-    applyMotion(document);
-    await loadSemesters();
-    await refreshData();
-}
-
-const loginForm = document.getElementById('loginForm');
-if (loginForm) {
-    loginForm.addEventListener('submit', handleLogin);
-}
-
-const backButton = document.getElementById('backButton');
-if (backButton) {
-    backButton.addEventListener('click', showHome);
-}
-
-const logoutBtn = document.getElementById('logoutBtn');
-if (logoutBtn) {
-    logoutBtn.addEventListener('click', logout);
-}
-
-const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
-if (refreshDashboardBtn) {
-    refreshDashboardBtn.addEventListener('click', async () => {
-        await refreshData(true);
-    });
-}
-
-const themeToggleLogin = document.getElementById('themeToggleLogin');
-if (themeToggleLogin) {
-    themeToggleLogin.addEventListener('click', toggleTheme);
-}
-
-const themeToggleApp = document.getElementById('themeToggleApp');
-if (themeToggleApp) {
-    themeToggleApp.addEventListener('click', toggleTheme);
-}
-
-document.querySelectorAll('.semester-select').forEach((select) => {
-    select.addEventListener('change', async (event) => {
-        await handleSemesterChange(event.currentTarget.value);
-    });
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    closeSidebar();
+  }
 });
 
-document.querySelectorAll('[data-module]').forEach((button) => {
-    button.addEventListener('click', () => showModule(button.dataset.module));
-});
-
-applyMotion(document);
-applyTheme(state.theme);
-
-if (state.isLoggedIn) {
-    bootApp();
-}
+document.addEventListener('DOMContentLoaded', initializeApp);
