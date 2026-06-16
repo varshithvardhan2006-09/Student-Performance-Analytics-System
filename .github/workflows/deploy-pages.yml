@@ -26,19 +26,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare site files
-        shell: pwsh
+        shell: bash
         run: |
-          Remove-Item -Recurse -Force public -ErrorAction SilentlyContinue
-          New-Item -ItemType Directory -Path public | Out-Null
-          Copy-Item -Path frontend\* -Destination public -Recurse -Force
-          $apiBaseUrl = "${{ secrets.SAPS_API_BASE_URL }}"
-          $configPath = Join-Path $PWD 'public\site-config.js'
-          $configContent = @"
-window.SAPS_CONFIG = window.SAPS_CONFIG || {
-  apiBaseUrl: '$apiBaseUrl',
-};
-"@
-          Set-Content -Path $configPath -Value $configContent -Encoding UTF8
+          rm -rf public
+          mkdir -p public
+          cp -R frontend/* public/
+          printf "window.SAPS_CONFIG = window.SAPS_CONFIG || {\n  apiBaseUrl: '%s',\n};\n" "${{ secrets.SAPS_API_BASE_URL }}" > public/site-config.js
+          touch public/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
