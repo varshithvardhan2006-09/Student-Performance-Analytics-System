@@ -68,7 +68,11 @@ const state = {
 };
 
 function getApiBaseUrl() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const queryUrl = urlParams.get('api');
+
   const configuredUrl = [
+    queryUrl,
     window.SAPS_CONFIG?.apiBaseUrl,
     localStorage.getItem(STORAGE_KEYS.apiBaseUrl),
     sessionStorage.getItem(STORAGE_KEYS.apiBaseUrl),
@@ -93,6 +97,19 @@ function resolveApiUrl(pathname) {
   const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
   const baseUrl = getApiBaseUrl();
   return baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
+}
+
+function setApiBaseUrl(apiBaseUrl) {
+  const normalized = String(apiBaseUrl || '').trim().replace(/\/+$/, '');
+  if (normalized) {
+    localStorage.setItem(STORAGE_KEYS.apiBaseUrl, normalized);
+    sessionStorage.setItem(STORAGE_KEYS.apiBaseUrl, normalized);
+    return normalized;
+  }
+
+  localStorage.removeItem(STORAGE_KEYS.apiBaseUrl);
+  sessionStorage.removeItem(STORAGE_KEYS.apiBaseUrl);
+  return '';
 }
 
 const pageHost = document.getElementById('pageHost');
@@ -264,6 +281,19 @@ function setAuthFeedback(message, type = 'info', mode = 'login') {
   element.textContent = message;
   element.className = `inline-feedback ${type}`;
   element.classList.remove('hidden');
+}
+
+function renderApiWarning() {
+  const loginFeedback = document.getElementById('loginFeedback');
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!loginFeedback || apiBaseUrl) {
+    return;
+  }
+
+  loginFeedback.textContent = 'Backend URL is not set. Add ?api=https://your-backend-url or save it in localStorage as saps-api-base-url.';
+  loginFeedback.className = 'inline-feedback error';
+  loginFeedback.classList.remove('hidden');
 }
 
 function hideAuthFeedback(mode = 'login') {
@@ -2100,6 +2130,7 @@ async function initializeApp() {
   setAuthMode('login');
   applyRememberedEmail();
   renderTeacherChip();
+  renderApiWarning();
 
   const loginForm = document.getElementById('loginForm');
   const signupForm = document.getElementById('signupForm');
