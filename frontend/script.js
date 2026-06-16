@@ -82,6 +82,11 @@ function getApiBaseUrl() {
     return configuredUrl.replace(/\/+$/, '');
   }
 
+  const hostname = window.location.hostname || '';
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.vercel.app')) {
+    return window.location.origin.replace(/\/+$/, '');
+  }
+
   return '';
 }
 
