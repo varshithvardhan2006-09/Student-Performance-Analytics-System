@@ -93,6 +93,15 @@ app.use((req, res, next) => {
 const frontendPath = path.join(__dirname, '..', 'frontend');
 app.use(express.static(frontendPath));
 
+app.use(async (req, res, next) => {
+  try {
+    await ensureDatabaseReady();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Multer setup - memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -119,6 +128,51 @@ let studentsCol;
 let analyticsCol;
 let aiInsightsCol;
 let reportsCol;
+let mongoClient;
+let databaseReadyPromise = null;
+
+async function initializeDatabase() {
+  if (mongoClient && db && usersCol && subjectsCol && uploadsCol && studentsCol && analyticsCol && aiInsightsCol && reportsCol) {
+    return db;
+  }
+
+  console.log('[STARTUP] Connecting to MongoDB...');
+  mongoClient = new MongoClient(MONGODB_URI);
+  await mongoClient.connect();
+  console.log('[STARTUP] Connected to MongoDB successfully');
+
+  db = mongoClient.db(MONGODB_DB);
+  usersCol = db.collection(USERS_COLLECTION);
+  subjectsCol = db.collection('subjects');
+  uploadsCol = db.collection('uploads');
+  studentsCol = db.collection('students');
+  analyticsCol = db.collection('analytics');
+  aiInsightsCol = db.collection('aiInsights');
+  reportsCol = db.collection('reports');
+  console.log('[STARTUP] All 7 collections initialized');
+
+  console.log('[STARTUP] Creating indexes...');
+  await usersCol.createIndex({ emailKey: 1 }, { unique: true });
+  await uploadsCol.createIndex({ userId: 1 });
+  await studentsCol.createIndex({ uploadId: 1 });
+  await analyticsCol.createIndex({ uploadId: 1 }, { unique: true });
+  await aiInsightsCol.createIndex({ uploadId: 1 });
+  console.log('[STARTUP] Indexes created successfully');
+
+  await seedDemoUser();
+  return db;
+}
+
+async function ensureDatabaseReady() {
+  if (!databaseReadyPromise) {
+    databaseReadyPromise = initializeDatabase().catch((error) => {
+      databaseReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return databaseReadyPromise;
+}
 
 // ============================================================================
 // Authentication Middleware
@@ -1817,36 +1871,7 @@ async function startServer() {
     console.log('============================================================');
     console.log('  Student Performance Analytics System');
     console.log('============================================================');
-    console.log('[STARTUP] Connecting to MongoDB...');
-
-    // Connect to MongoDB
-    const client = new MongoClient(MONGODB_URI);
-    await client.connect();
-    console.log('[STARTUP] Connected to MongoDB successfully');
-
-    // Get database reference
-    db = client.db(MONGODB_DB);
-
-    // Initialize collection references
-    usersCol = db.collection(USERS_COLLECTION);
-    subjectsCol = db.collection('subjects');
-    uploadsCol = db.collection('uploads');
-    studentsCol = db.collection('students');
-    analyticsCol = db.collection('analytics');
-    aiInsightsCol = db.collection('aiInsights');
-    reportsCol = db.collection('reports');
-    console.log('[STARTUP] All 7 collections initialized');
-
-    // Create indexes
-    console.log('[STARTUP] Creating indexes...');
-    await usersCol.createIndex({ emailKey: 1 }, { unique: true });
-    await uploadsCol.createIndex({ userId: 1 });
-    await studentsCol.createIndex({ uploadId: 1 });
-    await analyticsCol.createIndex({ uploadId: 1 }, { unique: true });
-    await aiInsightsCol.createIndex({ uploadId: 1 });
-    console.log('[STARTUP] Indexes created successfully');
-
-    await seedDemoUser();
+    await ensureDatabaseReady();
 
     // Start Express server
     app.listen(PORT, () => {
@@ -1863,7 +1888,9 @@ async function startServer() {
     const gracefulShutdown = async (signal) => {
       console.log(`\n[SHUTDOWN] ${signal} received. Closing connections...`);
       try {
-        await client.close();
+        if (mongoClient) {
+          await mongoClient.close();
+        }
         console.log('[SHUTDOWN] MongoDB connection closed');
       } catch (e) {
         console.error('[SHUTDOWN] Error closing MongoDB:', e.message);
@@ -1880,5 +1907,11 @@ async function startServer() {
   }
 }
 
-// Start the server
-startServer();
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = app;
+module.exports.app = app;
+module.exports.startServer = startServer;
+module.exports.ensureDatabaseReady = ensureDatabaseReady;

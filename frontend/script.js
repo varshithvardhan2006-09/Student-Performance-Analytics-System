@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   user: 'saps-user',
   rememberEmail: 'saps-remember-email',
   currentUploadId: 'saps-current-upload-id',
+  apiBaseUrl: 'saps-api-base-url',
 };
 
 const PAGE_META = {
@@ -65,6 +66,34 @@ const state = {
   },
   charts: [],
 };
+
+function getApiBaseUrl() {
+  const configuredUrl = [
+    window.SAPS_CONFIG?.apiBaseUrl,
+    localStorage.getItem(STORAGE_KEYS.apiBaseUrl),
+    sessionStorage.getItem(STORAGE_KEYS.apiBaseUrl),
+  ].find((value) => typeof value === 'string' && value.trim().length > 0);
+
+  if (configuredUrl) {
+    return configuredUrl.replace(/\/+$/, '');
+  }
+
+  return '';
+}
+
+function resolveApiUrl(pathname) {
+  if (!pathname) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(pathname)) {
+    return pathname;
+  }
+
+  const normalizedPath = pathname.startsWith('/') ? pathname : `/${pathname}`;
+  const baseUrl = getApiBaseUrl();
+  return baseUrl ? `${baseUrl}${normalizedPath}` : normalizedPath;
+}
 
 const pageHost = document.getElementById('pageHost');
 const authScreen = document.getElementById('authScreen');
@@ -177,7 +206,7 @@ async function requestJson(pathname, options = {}) {
     fetchOptions.headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(pathname, fetchOptions);
+  const response = await fetch(resolveApiUrl(pathname), fetchOptions);
   const text = await response.text();
   let data = null;
 
@@ -199,7 +228,7 @@ async function requestJson(pathname, options = {}) {
 }
 
 async function requestBlob(pathname, filename) {
-  const response = await fetch(pathname, {
+  const response = await fetch(resolveApiUrl(pathname), {
     headers: getAuthHeaders(),
   });
 

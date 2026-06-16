@@ -62,6 +62,29 @@ node index.js
 http://localhost:3000/index.html
 ```
 
+## Deployment
+
+### Backend on Vercel
+
+- Set the project root to the repository root.
+- Vercel serves the Express app through `api/[...path].js`.
+- Add these environment variables in Vercel:
+  - `MONGODB_URI`
+  - `MONGODB_DB`
+  - `MONGODB_USERS_COLLECTION`
+  - `JWT_SECRET`
+  - `GROQ_API_KEY`
+  - `DEMO_TEACHER_NAME`
+  - `DEMO_TEACHER_EMAIL`
+  - `DEMO_TEACHER_PASSWORD`
+
+### Frontend on GitHub Pages
+
+- GitHub Pages is published automatically from `.github/workflows/deploy-pages.yml`.
+- Add a repository secret named `SAPS_API_BASE_URL` with your deployed Vercel URL, for example `https://your-project.vercel.app`.
+- The workflow injects that backend URL into `frontend/site-config.js` during deployment.
+- After deployment, the frontend talks to the Vercel backend automatically.
+
 ## Key backend routes
 
 - `POST /api/signup`

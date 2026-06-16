@@ -1,0 +1,53 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare site files
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force public -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path public | Out-Null
+          Copy-Item -Path frontend\* -Destination public -Recurse -Force
+          $apiBaseUrl = "${{ secrets.SAPS_API_BASE_URL }}"
+          $configPath = Join-Path $PWD 'public\site-config.js'
+          $configContent = @"
+window.SAPS_CONFIG = window.SAPS_CONFIG || {
+  apiBaseUrl: '$apiBaseUrl',
+};
+"@
+          Set-Content -Path $configPath -Value $configContent -Encoding UTF8
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
