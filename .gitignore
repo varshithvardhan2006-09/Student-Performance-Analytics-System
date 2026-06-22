@@ -1,7 +1,11 @@
 backend/node_modules/
 node_modules/
+.mongodb-data/
+backend/.mongodb-data/
 .env
 backend/.env
+.env.example
+backend/.env.example
 *.log
 Thumbs.db
 .DS_Store

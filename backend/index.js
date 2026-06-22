@@ -18,6 +18,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
+const net = require('net');
+const http = require('http');
+const { spawn } = require('child_process');
 
 // ============================================================================
 // Custom .env Loader
@@ -130,9 +133,164 @@ let aiInsightsCol;
 let reportsCol;
 let mongoClient;
 let databaseReadyPromise = null;
+let localMongoStartupPromise = null;
 
 function isLocalMongoUri(uri) {
   return /mongodb:\/\/(127\.0\.0\.1|localhost)/i.test(String(uri || ''));
+}
+
+function isConnectionRefusedError(error) {
+  return Boolean(
+    error &&
+    (
+      error.code === 'ECONNREFUSED' ||
+      String(error.message || '').includes('ECONNREFUSED') ||
+      String(error.message || '').includes('Server selection timed out')
+    )
+  );
+}
+
+function candidateMongoBins() {
+  const candidates = [
+    'C:\\Program Files\\MongoDB\\Server\\8.2\\bin\\mongod.exe',
+    'C:\\Program Files\\MongoDB\\Server\\8.0\\bin\\mongod.exe',
+    'C:\\Program Files\\MongoDB\\Server\\7.0\\bin\\mongod.exe',
+    'C:\\Program Files\\MongoDB\\Server\\6.0\\bin\\mongod.exe',
+  ];
+
+  if (process.env.MONGOD_BIN && fs.existsSync(process.env.MONGOD_BIN)) {
+    candidates.unshift(process.env.MONGOD_BIN);
+  }
+
+  return candidates.filter((candidate) => fs.existsSync(candidate));
+}
+
+function waitForPort(host, port, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+
+    const attempt = () => {
+      const socket = net.connect(port, host);
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', () => {
+        socket.destroy();
+        if (Date.now() - startedAt >= timeoutMs) {
+          reject(new Error(`Timed out waiting for ${host}:${port}`));
+          return;
+        }
+        setTimeout(attempt, 500);
+      });
+    };
+
+    attempt();
+  });
+}
+
+function ensurePortAvailable(port) {
+  return new Promise((resolve, reject) => {
+    const tester = net.createServer()
+      .once('error', (error) => {
+        if (error.code === 'EADDRINUSE') {
+          reject(new Error(`Port ${port} is already in use. Open http://localhost:${port} or stop the existing server before starting another one.`));
+          return;
+        }
+
+        reject(error);
+      })
+      .once('listening', () => {
+        tester.close(resolve);
+      })
+      .listen(port, '127.0.0.1');
+  });
+}
+
+function isHttpServerAlreadyRunning(port) {
+  return new Promise((resolve) => {
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/health',
+      timeout: 1200,
+    }, (res) => {
+      res.resume();
+      resolve(true);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+
+    req.on('error', () => {
+      resolve(false);
+    });
+  });
+}
+
+async function ensureLocalMongoProcess() {
+  if (!isLocalMongoUri(MONGODB_URI)) {
+    return;
+  }
+
+  if (!isConnectionRefusedError(await tryMongoConnectOnce())) {
+    return;
+  }
+
+  if (localMongoStartupPromise) {
+    return localMongoStartupPromise;
+  }
+
+  localMongoStartupPromise = (async () => {
+    const mongoBin = candidateMongoBins()[0];
+    if (!mongoBin) {
+      throw new Error('Local MongoDB is not running and mongod.exe was not found. Start MongoDB Server or set MONGODB_URI to a cloud database.');
+    }
+
+    const localDataDir = process.env.LOCAL_MONGODB_DATA_DIR || path.join('C:', 'tmp', 'student-analytics-mongodb');
+    fs.mkdirSync(localDataDir, { recursive: true });
+    fs.mkdirSync(path.join(localDataDir, 'log'), { recursive: true });
+    fs.mkdirSync(path.join(localDataDir, 'db'), { recursive: true });
+    const logPath = path.join(localDataDir, 'log', 'mongod.log');
+
+    console.log(`[STARTUP] Launching local MongoDB from ${mongoBin}`);
+    const child = spawn(
+      mongoBin,
+      [
+        '--dbpath', path.join(localDataDir, 'db'),
+        '--bind_ip', '127.0.0.1',
+        '--port', '27017',
+        '--logpath', logPath,
+        '--logappend',
+      ],
+      {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      }
+    );
+    child.unref();
+    await waitForPort('127.0.0.1', 27017, 30000);
+    console.log('[STARTUP] Local MongoDB is ready');
+  })().catch((error) => {
+    localMongoStartupPromise = null;
+    throw error;
+  });
+
+  return localMongoStartupPromise;
+}
+
+async function tryMongoConnectOnce() {
+  try {
+    const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 2500 });
+    await client.connect();
+    await client.close();
+    return null;
+  } catch (error) {
+    return error;
+  }
 }
 
 async function initializeDatabase() {
@@ -145,8 +303,19 @@ async function initializeDatabase() {
   }
 
   console.log('[STARTUP] Connecting to MongoDB...');
-  mongoClient = new MongoClient(MONGODB_URI);
-  await mongoClient.connect();
+  try {
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+  } catch (error) {
+    if (isLocalMongoUri(MONGODB_URI) && isConnectionRefusedError(error)) {
+      console.warn('[STARTUP] Local MongoDB is not running. Attempting auto-start...');
+      await ensureLocalMongoProcess();
+      mongoClient = new MongoClient(MONGODB_URI);
+      await mongoClient.connect();
+    } else {
+      throw error;
+    }
+  }
   console.log('[STARTUP] Connected to MongoDB successfully');
 
   db = mongoClient.db(MONGODB_DB);
@@ -226,19 +395,268 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeReportType(value) {
+  return String(value || 'single').trim().toLowerCase() === 'multiple' ? 'multiple' : 'single';
+}
+
+function cleanHeaderLabel(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeSubjectMarks(subjectMarks) {
+  if (!isPlainObject(subjectMarks)) {
+    return {};
+  }
+
+  return Object.entries(subjectMarks).reduce((accumulator, [key, value]) => {
+    const label = cleanHeaderLabel(key);
+    if (!label || value === null || value === undefined || String(value).trim() === '') {
+      return accumulator;
+    }
+    accumulator[label] = value;
+    return accumulator;
+  }, {});
+}
+
+function extractSubjectMarks(record) {
+  if (!isPlainObject(record)) {
+    return {};
+  }
+
+  if (isPlainObject(record.subjectMarks)) {
+    return normalizeSubjectMarks(record.subjectMarks);
+  }
+
+  if (isPlainObject(record.marks)) {
+    return normalizeSubjectMarks(record.marks);
+  }
+
+  return {};
+}
+
+function hasSubjectMarks(record) {
+  return Object.keys(extractSubjectMarks(record)).length > 0;
+}
+
+function detectRecordsReportType(records, fallback = 'single') {
+  if (Array.isArray(records) && records.some((record) => hasSubjectMarks(record))) {
+    return 'multiple';
+  }
+
+  return normalizeReportType(fallback);
+}
+
+function getSubjectNamesFromStudents(students = [], analytics = null) {
+  const subjectNames = [];
+  const addSubjectName = (name) => {
+    const label = cleanHeaderLabel(name);
+    if (label && !subjectNames.includes(label)) {
+      subjectNames.push(label);
+    }
+  };
+
+  if (Array.isArray(analytics?.subjectSummary)) {
+    analytics.subjectSummary.forEach((subject) => addSubjectName(subject.subjectName));
+  }
+
+  students.forEach((student) => {
+    Object.keys(extractSubjectMarks(student)).forEach(addSubjectName);
+  });
+
+  return subjectNames;
+}
+
+function escapeCsvValue(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+function buildStudentPerformance(student, marks, maxMarks, passingMarks, rank = student.rank || 0) {
+  const numericMarks = Number(marks);
+  const safeMarks = Number.isFinite(numericMarks) ? numericMarks : 0;
+  const percentage = parseFloat(((safeMarks / maxMarks) * 100).toFixed(2));
+  const status = safeMarks >= passingMarks ? 'Pass' : 'Fail';
+  let category = 'Average Performer';
+
+  if (status === 'Fail') {
+    category = 'Failed';
+  } else if (percentage > 80) {
+    category = 'Top Performer';
+  } else if (percentage < 40) {
+    category = 'Weak Student';
+  }
+
+  return {
+    ...student,
+    marks: parseFloat(safeMarks.toFixed(2)),
+    percentage,
+    status,
+    category,
+    rank,
+  };
+}
+
+function calculateAnalyticsForSubset(students, maxMarks, reportType = 'single') {
+  if (!Array.isArray(students) || students.length === 0) {
+    return {
+      totalStudents: 0,
+      passedStudents: 0,
+      failedStudents: 0,
+      averageMarks: 0,
+      highestMarks: 0,
+      lowestMarks: 0,
+      passPercentage: 0,
+      failPercentage: 0,
+      marksDistribution: {
+        range_0_35: 0,
+        range_36_50: 0,
+        range_51_70: 0,
+        range_71_85: 0,
+        range_86_100: 0,
+      },
+      reportType: normalizeReportType(reportType),
+      subjectSummary: [],
+    };
+  }
+
+  return calculateAnalytics(students, maxMarks, reportType);
+}
+
+function buildFilteredDashboardData(uploadDoc, students, analytics, subjectFilter = 'all', studentFilter = 'all') {
+  const maxMarks = Number(uploadDoc.maxMarks) || 100;
+  const passingMarks = Number(uploadDoc.passingMarks) || 35;
+  const reportType = normalizeReportType(uploadDoc.subjectType || analytics?.reportType);
+  const subjectNames = getSubjectNamesFromStudents(students, analytics);
+  const subjectOptions = subjectNames.length
+    ? subjectNames
+    : [uploadDoc.subjectName].filter(Boolean);
+  const selectedSubject = String(subjectFilter || 'all').trim();
+  const selectedStudent = String(studentFilter || 'all').trim();
+  const normalizedSubject = selectedSubject.toLowerCase();
+  const normalizedStudent = selectedStudent.toLowerCase();
+
+  const studentOptions = students.map((student) => ({
+    rollNo: String(student.rollNo || ''),
+    studentName: String(student.studentName || ''),
+    label: `${student.studentName} (${student.rollNo})`,
+  }));
+
+  let filteredStudents = students.filter((student) => {
+    if (normalizedStudent === 'all') {
+      return true;
+    }
+
+    return String(student.rollNo || '').toLowerCase() === normalizedStudent
+      || String(student.studentName || '').toLowerCase() === normalizedStudent;
+  });
+
+  if (normalizedSubject !== 'all' && subjectNames.length) {
+    filteredStudents = filteredStudents
+      .map((student) => {
+        const subjectMarks = extractSubjectMarks(student);
+        const matchedSubject = subjectNames.find((subjectName) => subjectName.toLowerCase() === normalizedSubject);
+        if (!matchedSubject || subjectMarks[matchedSubject] === undefined) {
+          return null;
+        }
+
+        return buildStudentPerformance(
+          {
+            ...student,
+            selectedSubject: matchedSubject,
+            subjectMarks,
+          },
+          subjectMarks[matchedSubject],
+          maxMarks,
+          passingMarks,
+          student.rank
+        );
+      })
+      .filter(Boolean);
+  } else {
+    filteredStudents = filteredStudents.map((student) => buildStudentPerformance(
+      student,
+      student.marks,
+      maxMarks,
+      passingMarks,
+      student.rank
+    ));
+  }
+
+  filteredStudents.sort((left, right) => Number(right.marks) - Number(left.marks));
+  filteredStudents.forEach((student, index) => {
+    student.rank = index + 1;
+  });
+
+  const filteredAnalytics = calculateAnalyticsForSubset(
+    filteredStudents,
+    maxMarks,
+    subjectNames.length ? 'multiple' : reportType
+  );
+
+  if (normalizedSubject !== 'all' && subjectNames.length) {
+    const subjectName = subjectNames.find((name) => name.toLowerCase() === normalizedSubject) || selectedSubject;
+    const subjectMarks = filteredStudents.map((student) => Number(student.marks)).filter(Number.isFinite);
+    filteredAnalytics.subjectSummary = [{
+      subjectName,
+      averageMarks: subjectMarks.length ? parseFloat((subjectMarks.reduce((sum, mark) => sum + mark, 0) / subjectMarks.length).toFixed(2)) : 0,
+      highestMarks: subjectMarks.length ? Math.max(...subjectMarks) : 0,
+      lowestMarks: subjectMarks.length ? Math.min(...subjectMarks) : 0,
+    }];
+  }
+
+  return {
+    analytics: filteredAnalytics,
+    students: filteredStudents,
+    filters: {
+      selectedSubject: selectedSubject || 'all',
+      selectedStudent: selectedStudent || 'all',
+      subjectOptions,
+      studentOptions,
+    },
+  };
+}
+
 async function seedDemoUser() {
   if (!usersCol) {
     return;
   }
 
   const emailKey = normalizeEmail(DEMO_TEACHER.email);
-  const existing = await usersCol.findOne({ emailKey });
-  if (existing) {
+  const now = new Date();
+  const passwordHash = await bcrypt.hash(DEMO_TEACHER.password, 12);
+
+  const existingDemoUser = await usersCol.findOne({
+    $or: [
+      { emailKey },
+      { email: { $regex: `^${escapeRegExp(DEMO_TEACHER.email.trim())}$`, $options: 'i' } },
+    ],
+  });
+
+  if (existingDemoUser) {
+    await usersCol.updateOne(
+      { _id: existingDemoUser._id },
+      {
+        $set: {
+          fullName: existingDemoUser.fullName || DEMO_TEACHER.fullName.trim(),
+          email: existingDemoUser.email || DEMO_TEACHER.email.trim(),
+          emailKey,
+          passwordHash,
+          role: existingDemoUser.role || 'teacher',
+          updatedAt: now,
+        },
+      }
+    );
+    console.log(`[STARTUP] Verified demo teacher ${DEMO_TEACHER.email}`);
     return;
   }
 
-  const now = new Date();
-  const passwordHash = await bcrypt.hash(DEMO_TEACHER.password, 12);
   await usersCol.insertOne({
     fullName: DEMO_TEACHER.fullName.trim(),
     email: DEMO_TEACHER.email.trim(),
@@ -272,19 +690,46 @@ function normalizeColumnName(col) {
 /**
  * Normalize records by mapping column names
  */
-function normalizeRecords(rawRecords) {
+function normalizeRecords(rawRecords, reportType = 'single') {
   if (!rawRecords || rawRecords.length === 0) return [];
+
+  const normalizedReportType = normalizeReportType(reportType);
 
   // Get column mapping from first record
   const firstRecord = rawRecords[0];
   const columnMap = {};
+  const subjectKeys = [];
+  let hasMarksColumn = false;
+  let hasExtraColumns = false;
+  let hasStructuredSubjectMarks = false;
 
   for (const key of Object.keys(firstRecord)) {
     const mapped = normalizeColumnName(key);
     if (mapped) {
       columnMap[key] = mapped;
+      if (mapped === 'marks') {
+        hasMarksColumn = true;
+      }
+    } else if (key === 'subjectMarks') {
+      hasStructuredSubjectMarks = true;
+    } else {
+      hasExtraColumns = true;
+      subjectKeys.push(key);
     }
   }
+
+  for (const record of rawRecords) {
+    if (isPlainObject(record?.subjectMarks) || isPlainObject(record?.marks)) {
+      hasStructuredSubjectMarks = true;
+      break;
+    }
+  }
+
+  const effectiveReportType = normalizedReportType === 'multiple'
+    || hasStructuredSubjectMarks
+    || (!hasMarksColumn && hasExtraColumns)
+    ? 'multiple'
+    : 'single';
 
   // Map all records
   return rawRecords.map(record => {
@@ -292,6 +737,36 @@ function normalizeRecords(rawRecords) {
     for (const [originalKey, mappedKey] of Object.entries(columnMap)) {
       normalized[mappedKey] = record[originalKey];
     }
+
+    if (effectiveReportType === 'multiple') {
+      const subjectMarks = {};
+      const recordSubjectMarks = isPlainObject(record.subjectMarks) ? record.subjectMarks : null;
+
+      if (recordSubjectMarks) {
+        Object.assign(subjectMarks, normalizeSubjectMarks(recordSubjectMarks));
+      }
+
+      if (isPlainObject(record.marks)) {
+        Object.assign(subjectMarks, normalizeSubjectMarks(record.marks));
+      }
+
+      for (const key of subjectKeys) {
+        const value = record[key];
+        if (value === null || value === undefined || String(value).trim() === '') {
+          continue;
+        }
+        subjectMarks[cleanHeaderLabel(key)] = value;
+      }
+
+      if (Object.keys(subjectMarks).length > 0) {
+        normalized.subjectMarks = subjectMarks;
+      }
+    }
+
+    if (effectiveReportType === 'single' && record.marks !== undefined && normalized.marks === undefined) {
+      normalized.marks = record.marks;
+    }
+
     return normalized;
   });
 }
@@ -337,49 +812,76 @@ function parseExcel(buffer) {
 function parsePDFTextToRecords(text) {
   const lines = String(text || '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
   const records = [];
+  let subjectHeaders = [];
   let headerFound = false;
-  let columnOrder = [];
+
+  const splitLine = (line) => line.split(/\s+/).map((part) => part.trim()).filter(Boolean);
 
   for (const line of lines) {
-    // Try to detect header line
-    const lowerLine = line.toLowerCase();
-    if (!headerFound && (lowerLine.includes('roll') || lowerLine.includes('name') || lowerLine.includes('marks'))) {
-      // This might be a header line - try to parse column order
-      const parts = line.split(/[\t|,;]+|\s{2,}/).map(p => p.trim()).filter(p => p);
-      const tempOrder = [];
-      for (const part of parts) {
-        const mapped = normalizeColumnName(part);
-        if (mapped) {
-          tempOrder.push(mapped);
-        }
-      }
-      if (tempOrder.length >= 2) {
-        columnOrder = tempOrder;
-        headerFound = true;
-        continue;
-      }
+    const parts = splitLine(line);
+    if (parts.length < 3) {
+      continue;
+    }
+
+    const normalized = parts.map((part) => cleanHeaderLabel(part).toLowerCase());
+    const isRollHeader = normalized[0] === 'roll' && normalized[1] === 'no';
+    const isStudentHeader = normalized[2] === 'student' && normalized[3] === 'name';
+
+    if (!headerFound && isRollHeader && isStudentHeader && parts.length >= 5) {
+      subjectHeaders = parts.slice(4).map((part) => cleanHeaderLabel(part)).filter(Boolean);
+      headerFound = subjectHeaders.length > 0;
+      continue;
     }
 
     if (headerFound) {
-      // Try to parse data line
-      const parts = line.split(/[\t|,;]+|\s{2,}/).map(p => p.trim()).filter(p => p);
-      if (parts.length >= columnOrder.length) {
-        const record = {};
-        for (let i = 0; i < columnOrder.length; i++) {
-          record[columnOrder[i]] = parts[i];
+      const subjectCount = subjectHeaders.length;
+      if (parts.length < 2 + subjectCount) {
+        continue;
+      }
+
+      const rollNo = parts[0];
+      const studentName = parts.slice(1, parts.length - subjectCount).join(' ');
+      const subjectValues = parts.slice(-subjectCount);
+      const hasNumericSubjectValues = subjectValues.every((value) => Number.isFinite(parseFloat(value)));
+
+      if (!hasNumericSubjectValues) {
+        continue;
+      }
+
+      if (subjectCount === 1 && /^(marks?|score|total)$/i.test(subjectHeaders[0])) {
+        records.push({
+          rollNo,
+          studentName,
+          marks: subjectValues[0],
+        });
+        continue;
+      }
+
+      const subjectMarks = {};
+      let validRow = true;
+      for (let index = 0; index < subjectHeaders.length; index++) {
+        const subjectName = subjectHeaders[index];
+        const value = subjectValues[index];
+        if (value === undefined || value === null || String(value).trim() === '') {
+          validRow = false;
+          break;
         }
-        // Verify this looks like a data row (marks should be numeric)
-        if (record.marks && !isNaN(parseFloat(record.marks))) {
-          records.push(record);
-        }
+        subjectMarks[subjectName] = value;
+      }
+
+      if (validRow) {
+        records.push({
+          rollNo,
+          studentName,
+          subjectMarks,
+        });
       }
     }
   }
 
-  // If no header found, try parsing as simple tabular data: rollNo name marks
   if (records.length === 0) {
     for (const line of lines) {
-      const parts = line.split(/[\t|,;]+|\s{2,}/).map(p => p.trim()).filter(p => p);
+      const parts = splitLine(line);
       if (parts.length >= 3) {
         const lastPart = parts[parts.length - 1];
         if (!isNaN(parseFloat(lastPart))) {
@@ -416,11 +918,23 @@ function normalizePdfRecords(records) {
     return [];
   }
 
-  return records.map((record) => ({
-    rollNo: String(record?.rollNo ?? record?.roll_no ?? record?.roll ?? '').trim(),
-    studentName: String(record?.studentName ?? record?.student_name ?? record?.name ?? '').trim(),
-    marks: String(record?.marks ?? record?.score ?? record?.mark ?? '').trim(),
-  })).filter((record) => record.rollNo || record.studentName || record.marks);
+  return records.map((record) => {
+    const normalized = {
+      rollNo: String(record?.rollNo ?? record?.roll_no ?? record?.roll ?? '').trim(),
+      studentName: String(record?.studentName ?? record?.student_name ?? record?.name ?? '').trim(),
+    };
+
+    if (isPlainObject(record?.subjectMarks)) {
+      normalized.subjectMarks = normalizeSubjectMarks(record.subjectMarks);
+    } else if (isPlainObject(record?.marks)) {
+      normalized.subjectMarks = normalizeSubjectMarks(record.marks);
+    } else {
+      const marksValue = record?.marks ?? record?.score ?? record?.mark ?? '';
+      normalized.marks = String(marksValue).trim();
+    }
+
+    return normalized;
+  }).filter((record) => record.rollNo || record.studentName || record.marks || Object.keys(record.subjectMarks || {}).length);
 }
 
 async function parsePDF(buffer, fileName = 'uploaded.pdf') {
@@ -441,14 +955,15 @@ async function parsePDF(buffer, fileName = 'uploaded.pdf') {
         messages: [
           {
             role: 'system',
-            content: 'You validate student marks PDFs. Return only JSON with keys valid, reason, and records. records must be an array of objects with rollNo, studentName, and marks. If the file is not a valid student marks table, set valid to false and explain why.',
+            content: 'You validate student marks PDFs. Return only JSON with keys valid, reason, reportType, and records. For single-subject sheets, records must be an array of objects with rollNo, studentName, and marks. For multi-subject sheets, records must be an array of objects with rollNo, studentName, and subjectMarks, where subjectMarks is an object mapping subject names to numeric marks. If the file is not a valid student marks sheet, set valid to false and explain why.',
           },
           {
             role: 'user',
             content: [
               `File name: ${fileName}`,
-              'Determine whether the text below is a valid student marks table with Roll No, Student Name, and Marks columns.',
-              'If valid, extract every row into JSON records.',
+              'Determine whether the text below is a valid student marks table.',
+              'If it is a single-subject sheet, extract every row into JSON records with rollNo, studentName, and marks.',
+              'If it is a multi-subject sheet, extract every row into JSON records with rollNo, studentName, and subjectMarks.',
               'Return only JSON.',
               '',
               'PDF text:',
@@ -489,8 +1004,9 @@ async function parsePDF(buffer, fileName = 'uploaded.pdf') {
 /**
  * Validate parsed student records
  */
-function validateRecords(records, maxMarks) {
+function validateRecords(records, maxMarks, reportType = 'single') {
   const errors = [];
+  const normalizedReportType = normalizeReportType(reportType);
 
   if (!records || records.length === 0) {
     errors.push('No student records found in the file.');
@@ -502,10 +1018,12 @@ function validateRecords(records, maxMarks) {
   const hasRollNo = 'rollNo' in firstRecord;
   const hasName = 'studentName' in firstRecord;
   const hasMarks = 'marks' in firstRecord;
+  const hasSubjectMarks = Object.keys(extractSubjectMarks(firstRecord)).length > 0;
 
   if (!hasRollNo) errors.push('Missing required column: Roll No');
   if (!hasName) errors.push('Missing required column: Student Name');
-  if (!hasMarks) errors.push('Missing required column: Marks');
+  if (normalizedReportType === 'single' && !hasMarks) errors.push('Missing required column: Marks');
+  if (normalizedReportType === 'multiple' && !hasSubjectMarks && !hasMarks) errors.push('Missing required subject mark columns.');
 
   if (errors.length > 0) {
     return { valid: false, errors };
@@ -529,8 +1047,30 @@ function validateRecords(records, maxMarks) {
   for (let i = 0; i < records.length; i++) {
     const record = records[i];
     const rowNum = i + 1;
-    const marks = parseFloat(record.marks);
 
+    if (normalizedReportType === 'multiple') {
+      const subjectMarks = extractSubjectMarks(record);
+      const subjectEntries = Object.entries(subjectMarks);
+
+      if (subjectEntries.length === 0) {
+        errors.push(`Row ${rowNum}: No subject marks found.`);
+        continue;
+      }
+
+      for (const [subjectName, subjectValue] of subjectEntries) {
+        const marks = parseFloat(subjectValue);
+        if (isNaN(marks)) {
+          errors.push(`Row ${rowNum}: ${subjectName} marks must be a number (got "${subjectValue}")`);
+        } else if (marks < 0) {
+          errors.push(`Row ${rowNum}: ${subjectName} marks cannot be negative (got ${marks})`);
+        } else if (marks > maxMarks) {
+          errors.push(`Row ${rowNum}: ${subjectName} marks (${marks}) exceed maximum marks (${maxMarks})`);
+        }
+      }
+      continue;
+    }
+
+    const marks = parseFloat(record.marks);
     if (isNaN(marks)) {
       errors.push(`Row ${rowNum}: Marks must be a number (got "${record.marks}")`);
     } else if (marks < 0) {
@@ -546,9 +1086,45 @@ function validateRecords(records, maxMarks) {
 /**
  * Process student records - calculate percentage, status, category, rank
  */
-function processStudents(records, maxMarks, passingMarks) {
-  // Calculate percentage, status, category
-  const students = records.map(record => {
+function processStudents(records, maxMarks, passingMarks, reportType = 'single') {
+  const normalizedReportType = normalizeReportType(reportType);
+
+  const students = records.map((record) => {
+    if (normalizedReportType === 'multiple') {
+      const subjectMarks = extractSubjectMarks(record);
+      const subjectValues = Object.values(subjectMarks)
+        .map((value) => parseFloat(value))
+        .filter((value) => Number.isFinite(value));
+      const marks = subjectValues.length > 0
+        ? parseFloat((subjectValues.reduce((sum, value) => sum + value, 0) / subjectValues.length).toFixed(2))
+        : 0;
+      const percentage = parseFloat(((marks / maxMarks) * 100).toFixed(2));
+      const status = marks >= passingMarks ? 'Pass' : 'Fail';
+
+      let category;
+      if (status === 'Fail') {
+        category = 'Failed';
+      } else if (percentage > 80) {
+        category = 'Top Performer';
+      } else if (percentage >= 50 && percentage <= 80) {
+        category = 'Average Performer';
+      } else if (percentage < 40) {
+        category = 'Weak Student';
+      } else {
+        category = 'Average Performer';
+      }
+
+      return {
+        rollNo: String(record.rollNo).trim(),
+        studentName: String(record.studentName).trim(),
+        marks,
+        percentage,
+        status,
+        category,
+        subjectMarks,
+      };
+    }
+
     const marks = parseFloat(record.marks);
     const percentage = parseFloat(((marks / maxMarks) * 100).toFixed(2));
     const status = marks >= passingMarks ? 'Pass' : 'Fail';
@@ -588,11 +1164,11 @@ function processStudents(records, maxMarks, passingMarks) {
 /**
  * Calculate analytics from processed students
  */
-function calculateAnalytics(students, maxMarks) {
+function calculateAnalytics(students, maxMarks, reportType = 'single') {
   const totalStudents = students.length;
-  const passedStudents = students.filter(s => s.status === 'Pass').length;
-  const failedStudents = students.filter(s => s.status === 'Fail').length;
-  const allMarks = students.map(s => s.marks);
+  const passedStudents = students.filter((s) => s.status === 'Pass').length;
+  const failedStudents = students.filter((s) => s.status === 'Fail').length;
+  const allMarks = students.map((s) => s.marks);
   const averageMarks = parseFloat((allMarks.reduce((a, b) => a + b, 0) / totalStudents).toFixed(2));
   const highestMarks = Math.max(...allMarks);
   const lowestMarks = Math.min(...allMarks);
@@ -623,6 +1199,44 @@ function calculateAnalytics(students, maxMarks) {
     }
   }
 
+  const subjectSummary = normalizeReportType(reportType) === 'multiple'
+    ? (() => {
+        const aggregation = new Map();
+        for (const student of students) {
+          if (!isPlainObject(student.subjectMarks)) {
+            continue;
+          }
+
+          for (const [subjectName, subjectValue] of Object.entries(student.subjectMarks)) {
+            const marks = parseFloat(subjectValue);
+            if (!Number.isFinite(marks)) {
+              continue;
+            }
+
+            const bucket = aggregation.get(subjectName) || {
+              subjectName,
+              total: 0,
+              count: 0,
+              highest: marks,
+              lowest: marks,
+            };
+            bucket.total += marks;
+            bucket.count += 1;
+            bucket.highest = Math.max(bucket.highest, marks);
+            bucket.lowest = Math.min(bucket.lowest, marks);
+            aggregation.set(subjectName, bucket);
+          }
+        }
+
+        return Array.from(aggregation.values()).map((bucket) => ({
+          subjectName: bucket.subjectName,
+          averageMarks: parseFloat((bucket.total / bucket.count).toFixed(2)),
+          highestMarks: bucket.highest,
+          lowestMarks: bucket.lowest,
+        }));
+      })()
+    : [];
+
   return {
     totalStudents,
     passedStudents,
@@ -632,7 +1246,9 @@ function calculateAnalytics(students, maxMarks) {
     lowestMarks,
     passPercentage,
     failPercentage,
-    marksDistribution
+    marksDistribution,
+    reportType: normalizeReportType(reportType),
+    subjectSummary,
   };
 }
 
@@ -735,6 +1351,200 @@ function generateFallbackInsights(analytics, subjectName) {
     improvementStrategy,
     actionPlan
   };
+}
+
+function normalizeMarksValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function buildQueryStudentList(students = []) {
+  return [...students]
+    .map((student) => ({
+      rollNo: String(student.rollNo ?? '').trim(),
+      studentName: String(student.studentName ?? '').trim(),
+      marks: normalizeMarksValue(student.marks) ?? 0,
+      percentage: normalizeMarksValue(student.percentage) ?? 0,
+      status: String(student.status ?? '').trim(),
+      category: String(student.category ?? '').trim(),
+      rank: normalizeMarksValue(student.rank) ?? 0,
+    }))
+    .filter((student) => student.rollNo || student.studentName);
+}
+
+function buildQueryFacts(analytics, students, subjectName) {
+  const sortedStudents = buildQueryStudentList(students).sort((left, right) => (left.rank || 0) - (right.rank || 0) || (right.percentage || 0) - (left.percentage || 0));
+  const topStudents = sortedStudents.slice(0, 5);
+  const failedStudents = sortedStudents
+    .filter((student) => String(student.status).toLowerCase() === 'fail')
+    .slice(0, 5);
+  const weakStudents = sortedStudents
+    .filter((student) => student.percentage < 40 || String(student.status).toLowerCase() === 'fail')
+    .slice(0, 5);
+
+  return {
+    subjectName,
+    analytics: {
+      totalStudents: analytics.totalStudents || sortedStudents.length || 0,
+      passedStudents: analytics.passedStudents || 0,
+      failedStudents: analytics.failedStudents || 0,
+      averageMarks: analytics.averageMarks || 0,
+      highestMarks: analytics.highestMarks || 0,
+      lowestMarks: analytics.lowestMarks || 0,
+      passPercentage: analytics.passPercentage || 0,
+      failPercentage: analytics.failPercentage || 0,
+      marksDistribution: analytics.marksDistribution || {},
+      reportType: analytics.reportType || 'single',
+      subjectSummary: Array.isArray(analytics.subjectSummary) ? analytics.subjectSummary : [],
+    },
+    topStudents,
+    failedStudents,
+    weakStudents,
+    students: sortedStudents,
+  };
+}
+
+function parseQuestionRange(question) {
+  const normalized = String(question || '').toLowerCase();
+  const match = normalized.match(/(?:between|from)?\s*(\d+(?:\.\d+)?)\s*(?:to|-|and)\s*(\d+(?:\.\d+)?)/i);
+  if (!match) {
+    return null;
+  }
+
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  if (!Number.isFinite(first) || !Number.isFinite(second)) {
+    return null;
+  }
+
+  return {
+    lower: Math.min(first, second),
+    upper: Math.max(first, second),
+    usePercentage: normalized.includes('percent') || normalized.includes('percentage') || normalized.includes('%'),
+  };
+}
+
+function answerQuestionFromData(question, analytics, students) {
+  const normalized = String(question || '').toLowerCase();
+  const range = parseQuestionRange(question);
+  const list = buildQueryStudentList(students);
+  const topStudents = [...list].slice(0, 5);
+  const failedStudents = list.filter((student) => String(student.status).toLowerCase() === 'fail').slice(0, 5);
+  const weakStudents = list.filter((student) => student.percentage < 40 || String(student.status).toLowerCase() === 'fail').slice(0, 5);
+  const subjectSummary = Array.isArray(analytics.subjectSummary) ? analytics.subjectSummary : [];
+
+  if (range) {
+    const matchingStudents = list.filter((student) => {
+      const value = range.usePercentage ? student.percentage : student.marks;
+      return value >= range.lower && value <= range.upper;
+    });
+
+    if (!matchingStudents.length) {
+      return `No students were found in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range.`;
+    }
+
+    return `Students in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range: ${matchingStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, Marks ${student.marks}, ${student.percentage}%)`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('failed') || normalized.includes('failure') || normalized.includes('students who are failed')) {
+    if (!failedStudents.length) {
+      return 'No failed students were found in the current upload.';
+    }
+
+    return `Failed students: ${failedStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, Marks ${student.marks}, ${student.percentage}%)`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('top') || normalized.includes('best') || normalized.includes('highest')) {
+    if (!topStudents.length) {
+      return 'No top performers are available for the current upload.';
+    }
+
+    return `Top performers: ${topStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${student.percentage}%)`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('weak') || normalized.includes('risk')) {
+    if (!weakStudents.length) {
+      return 'No weak students were found in the current upload.';
+    }
+
+    return `Weak students: ${weakStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${student.percentage}%)`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('pass') || normalized.includes('fail')) {
+    return `Pass/fail summary: ${analytics.passedStudents || 0} passed and ${analytics.failedStudents || 0} failed out of ${analytics.totalStudents || list.length || 0} students. Pass percentage is ${analytics.passPercentage || 0}%.`;
+  }
+
+  if (normalized.includes('average') || normalized.includes('mean')) {
+    return `The class average is ${analytics.averageMarks || 0}. The highest mark is ${analytics.highestMarks || 0} and the lowest mark is ${analytics.lowestMarks || 0}.`;
+  }
+
+  if (subjectSummary.length && (normalized.includes('subject') || normalized.includes('which subject') || normalized.includes('highest subject') || normalized.includes('lowest subject'))) {
+    const rankedSubjects = [...subjectSummary].sort((left, right) => (right.averageMarks || 0) - (left.averageMarks || 0));
+    const bestSubject = rankedSubjects[0];
+    const weakestSubject = rankedSubjects[rankedSubjects.length - 1];
+    return `Subject-wise summary: ${subjectSummary
+      .map((subject) => `${subject.subjectName} average ${subject.averageMarks}`)
+      .join('; ')}. Highest average is ${bestSubject.subjectName} (${bestSubject.averageMarks}), and lowest average is ${weakestSubject.subjectName} (${weakestSubject.averageMarks}).`;
+  }
+
+  return '';
+}
+
+async function generateQuestionAnswer(question, analytics, students, subjectName) {
+  const deterministicAnswer = answerQuestionFromData(question, analytics, students);
+  if (deterministicAnswer) {
+    return deterministicAnswer;
+  }
+
+  if (!GROQ_API_KEY) {
+    return `I can only answer questions based on the uploaded ${subjectName} data. Ask me about marks, ranges, top performers, weak students, or pass/fail trends.`;
+  }
+
+  const context = buildQueryFacts(analytics, students, subjectName);
+  const groq = new Groq({ apiKey: GROQ_API_KEY });
+  const completion = await groq.chat.completions.create({
+    messages: [
+      {
+        role: 'system',
+        content: [
+          'You answer questions about student performance data.',
+          'Use only the facts provided in the context.',
+          'Never invent names, marks, percentages, or counts.',
+          'If the answer is not available from the context, say that clearly.',
+          'When listing students, include their names, roll numbers, marks, and percentages when relevant.',
+          'Be concise and answer the exact question the user asked.',
+          'Return only JSON with a single key called "answer".',
+        ].join(' '),
+      },
+      {
+        role: 'user',
+        content: [
+          `Subject: ${subjectName}`,
+          `Question: ${question}`,
+          'Context:',
+          JSON.stringify(context, null, 2),
+        ].join('\n'),
+      },
+    ],
+    model: 'llama-3.1-8b-instant',
+    temperature: 0.2,
+  });
+
+  const aiContent = completion.choices?.[0]?.message?.content || '';
+  const payload = extractJsonObject(aiContent);
+  if (payload && typeof payload.answer === 'string' && payload.answer.trim()) {
+    return payload.answer.trim();
+  }
+
+  return aiContent.trim() || `I could not generate a reliable answer from the ${subjectName} data.`;
 }
 
 /**
@@ -854,19 +1664,14 @@ app.post('/api/signup', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Passwords do not match.' });
     }
 
-    // Check if email already exists
-    const emailKey = email.toLowerCase().trim();
-    const existingUser = await usersCol.findOne({ emailKey });
-    if (existingUser) {
-      return res.status(400).json({ success: false, message: 'An account with this email already exists.' });
-    }
+    const emailKey = normalizeEmail(email);
 
     // Hash password
     const passwordHash = await bcrypt.hash(password, 12);
 
     // Insert user
     const now = new Date();
-    const result = await usersCol.insertOne({
+    await usersCol.insertOne({
       fullName: fullName.trim(),
       email: email.trim(),
       emailKey,
@@ -881,7 +1686,11 @@ app.post('/api/signup', async (req, res) => {
       message: 'Account created successfully'
     });
   } catch (err) {
-    console.error('[SIGNUP ERROR]', err);
+    if (err.code === 11000) {
+      return res.status(409).json({ success: false, message: 'An account with this email already exists. Please log in instead.' });
+    }
+
+    console.error('[SIGNUP ERROR]', err.message || err);
     res.status(500).json({ success: false, message: 'An error occurred during signup. Please try again.' });
   }
 });
@@ -897,16 +1706,37 @@ app.post('/api/login', async (req, res) => {
     }
 
     // Find user
-    const emailKey = email.toLowerCase().trim();
-    const user = await usersCol.findOne({ emailKey });
+    const emailKey = normalizeEmail(email);
+    const user = await usersCol.findOne({
+      $or: [
+        { emailKey },
+        { email: { $regex: `^${escapeRegExp(String(email).trim())}$`, $options: 'i' } },
+      ],
+    });
     if (!user) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
     // Compare password
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!isPasswordValid) {
+    const isDemoTeacher = normalizeEmail(email) === normalizeEmail(DEMO_TEACHER.email);
+    const isLegacyDemoPassword = isDemoTeacher && (password === 'Demo@123' || password === 'Demo@1234');
+
+    if (!isPasswordValid && !isLegacyDemoPassword) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+    }
+
+    if (isLegacyDemoPassword && (!isPasswordValid || user.emailKey !== emailKey)) {
+      await usersCol.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            emailKey,
+            passwordHash: await bcrypt.hash(DEMO_TEACHER.password, 12),
+            updatedAt: new Date(),
+          },
+        }
+      );
     }
 
     // Generate JWT
@@ -988,16 +1818,18 @@ app.get('/api/profile/stats', authMiddleware, async (req, res) => {
 // ============================================================================
 
 // POST /api/upload
-app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) => {
+app.post('/api/upload', authMiddleware, upload.array('file'), async (req, res) => {
   try {
-    const { subjectName, className, maxMarks, passingMarks } = req.body;
+    const { subjectName, className, maxMarks, passingMarks, subjectType } = req.body;
     const userId = req.userId.toString();
+    const requestedReportType = normalizeReportType(subjectType);
+    let reportType = requestedReportType;
 
     // Step 1: Validate subject fields
     if (!subjectName || !className || !maxMarks || !passingMarks) {
       return res.status(400).json({
         success: false,
-        message: 'All fields are required: subjectName, className, maxMarks, passingMarks.'
+        message: 'All fields are required: subjectName, className, maxMarks, passingMarks, subjectType.'
       });
     }
 
@@ -1016,74 +1848,81 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
       return res.status(400).json({ success: false, message: 'Passing marks cannot exceed maximum marks.' });
     }
 
-    // Step 2: Validate file
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'Please upload a file.' });
+    // Step 2: Validate files
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+    if (!uploadedFiles.length) {
+      return res.status(400).json({ success: false, message: 'Please upload at least one file.' });
     }
 
-    const fileExtension = path.extname(req.file.originalname).toLowerCase();
     const allowedExtensions = ['.csv', '.xlsx', '.xls', '.pdf'];
-    if (!allowedExtensions.includes(fileExtension)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid file format. Allowed formats: CSV, XLSX, XLS, PDF.'
-      });
-    }
+    const allRecords = [];
 
-    // Step 3: Parse file
-    let rawRecords = [];
-    const buffer = req.file.buffer;
-
-    try {
-      if (fileExtension === '.csv') {
-        rawRecords = await parseCSV(buffer);
-      } else if (fileExtension === '.xlsx' || fileExtension === '.xls') {
-        rawRecords = parseExcel(buffer);
-      } else if (fileExtension === '.pdf') {
-        rawRecords = await parsePDF(buffer, req.file.originalname);
+    for (const currentFile of uploadedFiles) {
+      const fileExtension = path.extname(currentFile.originalname).toLowerCase();
+      if (!allowedExtensions.includes(fileExtension)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid file format in ${currentFile.originalname}. Allowed formats: CSV, XLSX, XLS, PDF.`
+        });
       }
-    } catch (parseErr) {
-      console.error('[FILE PARSE ERROR]', parseErr);
-      return res.status(400).json({
-        success: false,
-        message: `Failed to parse file: ${parseErr.message}`
-      });
-    }
 
-    // Step 4: Normalize column names
-    let records;
-    // Check if records are already normalized (from PDF parser)
-    if (rawRecords.length > 0 && ('rollNo' in rawRecords[0] || 'studentName' in rawRecords[0] || 'marks' in rawRecords[0])) {
-      // Check if ALL expected keys are present (fully normalized)
-      const firstKeys = Object.keys(rawRecords[0]);
-      const hasAllNormalized = firstKeys.includes('rollNo') && firstKeys.includes('studentName') && firstKeys.includes('marks');
-      if (hasAllNormalized) {
-        records = rawRecords;
-      } else {
-        records = normalizeRecords(rawRecords);
+      let rawRecords = [];
+      const buffer = currentFile.buffer;
+
+      try {
+        if (fileExtension === '.csv') {
+          rawRecords = await parseCSV(buffer);
+        } else if (fileExtension === '.xlsx' || fileExtension === '.xls') {
+          rawRecords = parseExcel(buffer);
+        } else if (fileExtension === '.pdf') {
+          rawRecords = await parsePDF(buffer, currentFile.originalname);
+        }
+      } catch (parseErr) {
+        console.error('[FILE PARSE ERROR]', parseErr);
+        return res.status(400).json({
+          success: false,
+          message: `Failed to parse ${currentFile.originalname}: ${parseErr.message}`
+        });
       }
-    } else {
-      records = normalizeRecords(rawRecords);
+
+      const records = normalizeRecords(rawRecords, reportType);
+      const fileReportType = detectRecordsReportType(records, reportType);
+      if (fileReportType === 'multiple') {
+        reportType = 'multiple';
+      }
+
+      const validation = validateRecords(records, maxMarksNum, fileReportType);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: `File validation failed for ${currentFile.originalname}.`,
+          errors: validation.errors
+        });
+      }
+
+      allRecords.push(...records);
     }
 
-    // Step 5: Validate records
-    const validation = validateRecords(records, maxMarksNum);
-    if (!validation.valid) {
+    // Step 3: Validate merged records
+    const combinedValidation = validateRecords(allRecords, maxMarksNum, reportType);
+    if (!combinedValidation.valid) {
       return res.status(400).json({
         success: false,
-        message: 'File validation failed.',
-        errors: validation.errors
+        message: 'Combined file validation failed.',
+        errors: combinedValidation.errors
       });
     }
 
-    // Step 6 & 7: Process students (calculate percentage, status, category, rank)
-    const students = processStudents(records, maxMarksNum, passingMarksNum);
+    // Step 4: Process students (calculate percentage, status, category, rank)
+    const students = processStudents(allRecords, maxMarksNum, passingMarksNum, reportType);
 
-    // Step 8: Calculate analytics
-    const analyticsData = calculateAnalytics(students, maxMarksNum);
+    // Step 5: Calculate analytics
+    const analyticsData = calculateAnalytics(students, maxMarksNum, reportType);
 
-    // Step 9: Save to MongoDB
+    // Step 6: Save to MongoDB
     const now = new Date();
+    const fileNames = uploadedFiles.map((file) => file.originalname);
+    const totalFileSize = uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
 
     // Insert subject
     const subjectResult = await subjectsCol.insertOne({
@@ -1091,6 +1930,7 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
       className: className.trim(),
       maxMarks: maxMarksNum,
       passingMarks: passingMarksNum,
+      subjectType: reportType,
       userId,
       createdAt: now
     });
@@ -1103,9 +1943,12 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
       className: className.trim(),
       maxMarks: maxMarksNum,
       passingMarks: passingMarksNum,
-      fileName: req.file.originalname,
-      originalName: req.file.originalname,
-      fileSize: req.file.size,
+      subjectType: reportType,
+      fileName: fileNames[0],
+      fileNames,
+      fileCount: fileNames.length,
+      originalName: fileNames[0],
+      fileSize: totalFileSize,
       studentCount: students.length,
       userId,
       uploadDate: now,
@@ -1123,6 +1966,8 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
       status: student.status,
       category: student.category,
       rank: student.rank,
+      subjectMarks: student.subjectMarks || null,
+      subjectType: reportType,
       userId
     }));
     await studentsCol.insertMany(studentDocs);
@@ -1135,12 +1980,14 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
       calculatedAt: now
     });
 
-    // Step 10: Return response
+    // Step 7: Return response
     res.status(201).json({
       success: true,
       uploadId,
       analytics: analyticsData,
       studentCount: students.length,
+      fileCount: fileNames.length,
+      subjectType: reportType,
       message: 'File processed successfully'
     });
   } catch (err) {
@@ -1152,6 +1999,42 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
 // ============================================================================
 // Analytics APIs
 // ============================================================================
+
+// GET /api/analytics/:uploadId/filtered
+app.get('/api/analytics/:uploadId/filtered', authMiddleware, async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+    const userId = req.userId.toString();
+    const { subject = 'all', student = 'all' } = req.query;
+
+    const uploadDoc = await uploadsCol.findOne({ _id: new ObjectId(uploadId), userId });
+    if (!uploadDoc) {
+      return res.status(404).json({ success: false, message: 'Upload not found.' });
+    }
+
+    const analytics = await analyticsCol.findOne({ uploadId, userId });
+    if (!analytics) {
+      return res.status(404).json({ success: false, message: 'Analytics not found for this upload.' });
+    }
+
+    const students = await studentsCol
+      .find({ uploadId, userId })
+      .sort({ rank: 1 })
+      .limit(5000)
+      .toArray();
+
+    const filteredData = buildFilteredDashboardData(uploadDoc, students, analytics, subject, student);
+
+    res.json({
+      success: true,
+      upload: uploadDoc,
+      ...filteredData,
+    });
+  } catch (err) {
+    console.error('[FILTERED ANALYTICS ERROR]', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch filtered analytics.' });
+  }
+});
 
 // GET /api/analytics/:uploadId
 app.get('/api/analytics/:uploadId', authMiddleware, async (req, res) => {
@@ -1346,6 +2229,44 @@ Please provide:
   }
 });
 
+// POST /api/ai-query/:uploadId
+app.post('/api/ai-query/:uploadId', authMiddleware, async (req, res) => {
+  try {
+    const { uploadId } = req.params;
+    const userId = req.userId.toString();
+    const question = String(req.body?.question || '').trim();
+
+    if (!question) {
+      return res.status(400).json({ success: false, message: 'Question is required.' });
+    }
+
+    const analytics = await analyticsCol.findOne({ uploadId, userId });
+    if (!analytics) {
+      return res.status(404).json({ success: false, message: 'Analytics not found. Please upload data first.' });
+    }
+
+    const uploadDoc = await uploadsCol.findOne({ _id: new ObjectId(uploadId), userId });
+    if (!uploadDoc) {
+      return res.status(404).json({ success: false, message: 'Upload not found.' });
+    }
+
+    const students = await studentsCol
+      .find({ uploadId, userId })
+      .sort({ rank: 1, percentage: -1, marks: -1, studentName: 1 })
+      .toArray();
+
+    const answer = await generateQuestionAnswer(question, analytics, students, uploadDoc.subjectName || 'Current Subject');
+
+    res.json({
+      success: true,
+      answer,
+    });
+  } catch (err) {
+    console.error('[AI QUERY ERROR]', err);
+    res.status(500).json({ success: false, message: 'Failed to answer the question.' });
+  }
+});
+
 // GET /api/ai-insights/:uploadId
 app.get('/api/ai-insights/:uploadId', authMiddleware, async (req, res) => {
   try {
@@ -1393,6 +2314,8 @@ app.get('/api/reports/:uploadId/pdf', authMiddleware, async (req, res) => {
       .find({ uploadId, userId })
       .sort({ rank: 1 })
       .toArray();
+    const subjectNames = getSubjectNamesFromStudents(students, analytics);
+    const isMultiSubject = normalizeReportType(uploadDoc.subjectType || analytics.reportType) === 'multiple' || subjectNames.length > 0;
 
     // Create PDF
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
@@ -1573,6 +2496,8 @@ app.get('/api/reports/:uploadId/excel', authMiddleware, async (req, res) => {
       .find({ uploadId, userId })
       .sort({ rank: 1 })
       .toArray();
+    const subjectNames = getSubjectNamesFromStudents(students, analytics);
+    const isMultiSubject = normalizeReportType(uploadDoc.subjectType || analytics.reportType) === 'multiple' || subjectNames.length > 0;
 
     // Create workbook
     const workbook = xlsx.utils.book_new();
@@ -1581,6 +2506,7 @@ app.get('/api/reports/:uploadId/excel', authMiddleware, async (req, res) => {
     const summaryData = [
       ['Metric', 'Value'],
       ['Subject', uploadDoc.subjectName],
+      ['Report Type', isMultiSubject ? 'Multiple Subjects' : 'Single Subject'],
       ['Class', uploadDoc.className],
       ['Maximum Marks', uploadDoc.maxMarks],
       ['Passing Marks', uploadDoc.passingMarks],
@@ -1602,19 +2528,43 @@ app.get('/api/reports/:uploadId/excel', authMiddleware, async (req, res) => {
       ['71-85%', analytics.marksDistribution.range_71_85],
       ['86-100%', analytics.marksDistribution.range_86_100]
     ];
+    if (subjectNames.length && Array.isArray(analytics.subjectSummary)) {
+      summaryData.push(['', '']);
+      summaryData.push(['Subject Wise Analysis', '']);
+      summaryData.push(['Subject', 'Average Marks', 'Highest Marks', 'Lowest Marks']);
+      for (const subject of analytics.subjectSummary) {
+        summaryData.push([
+          subject.subjectName,
+          subject.averageMarks,
+          subject.highestMarks,
+          subject.lowestMarks,
+        ]);
+      }
+    }
     const summarySheet = xlsx.utils.aoa_to_sheet(summaryData);
-    summarySheet['!cols'] = [{ wch: 20 }, { wch: 25 }];
+    summarySheet['!cols'] = [{ wch: 22 }, { wch: 25 }, { wch: 18 }, { wch: 18 }];
     xlsx.utils.book_append_sheet(workbook, summarySheet, 'Analytics Summary');
 
     // Sheet 2: Student Data
     const studentData = [
-      ['Rank', 'Roll No', 'Student Name', 'Marks', 'Percentage', 'Status', 'Category']
+      [
+        'Rank',
+        'Roll No',
+        'Student Name',
+        ...subjectNames,
+        isMultiSubject ? 'Average Marks' : 'Marks',
+        'Percentage',
+        'Status',
+        'Category'
+      ]
     ];
     for (const s of students) {
+      const subjectMarks = extractSubjectMarks(s);
       studentData.push([
         s.rank,
         s.rollNo,
         s.studentName,
+        ...subjectNames.map((subjectName) => subjectMarks[subjectName] ?? ''),
         s.marks,
         s.percentage,
         s.status,
@@ -1623,7 +2573,9 @@ app.get('/api/reports/:uploadId/excel', authMiddleware, async (req, res) => {
     }
     const studentSheet = xlsx.utils.aoa_to_sheet(studentData);
     studentSheet['!cols'] = [
-      { wch: 8 }, { wch: 12 }, { wch: 25 }, { wch: 10 },
+      { wch: 8 }, { wch: 12 }, { wch: 25 },
+      ...subjectNames.map(() => ({ wch: 12 })),
+      { wch: 14 },
       { wch: 12 }, { wch: 10 }, { wch: 20 }
     ];
     xlsx.utils.book_append_sheet(workbook, studentSheet, 'Student Data');
@@ -1672,21 +2624,35 @@ app.get('/api/reports/:uploadId/csv', authMiddleware, async (req, res) => {
       return res.status(404).json({ success: false, message: 'No student data found.' });
     }
 
+    const subjectNames = getSubjectNamesFromStudents(students);
+    const isMultiSubject = normalizeReportType(uploadDoc.subjectType) === 'multiple' || subjectNames.length > 0;
+
     // Build CSV content
-    const headers = ['Rank', 'Roll No', 'Student Name', 'Marks', 'Percentage', 'Status', 'Category'];
-    const csvRows = [headers.join(',')];
+    const headers = [
+      'Rank',
+      'Roll No',
+      'Student Name',
+      ...subjectNames,
+      isMultiSubject ? 'Average Marks' : 'Marks',
+      'Percentage',
+      'Status',
+      'Category'
+    ];
+    const csvRows = [headers.map(escapeCsvValue).join(',')];
 
     for (const s of students) {
+      const subjectMarks = extractSubjectMarks(s);
       const row = [
         s.rank,
-        `"${String(s.rollNo).replace(/"/g, '""')}"`,
-        `"${String(s.studentName).replace(/"/g, '""')}"`,
+        s.rollNo,
+        s.studentName,
+        ...subjectNames.map((subjectName) => subjectMarks[subjectName] ?? ''),
         s.marks,
         s.percentage,
         s.status,
         s.category
       ];
-      csvRows.push(row.join(','));
+      csvRows.push(row.map(escapeCsvValue).join(','));
     }
 
     const csvContent = csvRows.join('\n');
@@ -1875,27 +2841,48 @@ app.use((err, req, res, next) => {
 // Server Startup
 // ============================================================================
 async function startServer() {
+  let server;
+
   try {
     console.log('============================================================');
     console.log('  Student Performance Analytics System');
     console.log('============================================================');
+    if (await isHttpServerAlreadyRunning(PORT)) {
+      throw new Error(`The backend is already running at http://localhost:${PORT}. Keep using that window, or stop it before starting another server.`);
+    }
+
+    await ensurePortAvailable(PORT);
     await ensureDatabaseReady();
 
-    // Start Express server
-    app.listen(PORT, () => {
-      console.log('------------------------------------------------------------');
-      console.log(`[SERVER] Running on http://localhost:${PORT}`);
-      console.log(`[SERVER] Database: ${MONGODB_DB}`);
-      console.log(`[SERVER] Frontend: ${frontendPath}`);
-      console.log(`[SERVER] Groq AI: ${GROQ_API_KEY ? 'Configured' : 'Not configured (fallback mode)'}`);
-      console.log('------------------------------------------------------------');
-      console.log('[SERVER] Ready to accept requests');
+    await new Promise((resolve, reject) => {
+      server = app.listen(PORT, () => {
+        console.log('------------------------------------------------------------');
+        console.log(`[SERVER] Running on http://localhost:${PORT}`);
+        console.log(`[SERVER] Database: ${MONGODB_DB}`);
+        console.log(`[SERVER] Frontend: ${frontendPath}`);
+        console.log(`[SERVER] Groq AI: ${GROQ_API_KEY ? 'Configured' : 'Not configured (fallback mode)'}`);
+        console.log('------------------------------------------------------------');
+        console.log('[SERVER] Ready to accept requests');
+        resolve();
+      });
+
+      server.on('error', (error) => {
+        if (error.code === 'EADDRINUSE') {
+          reject(new Error(`Port ${PORT} is already in use. Open http://localhost:${PORT} or stop the existing server before starting another one.`));
+          return;
+        }
+
+        reject(error);
+      });
     });
 
     // Graceful shutdown
     const gracefulShutdown = async (signal) => {
       console.log(`\n[SHUTDOWN] ${signal} received. Closing connections...`);
       try {
+        if (server) {
+          await new Promise((resolve) => server.close(resolve));
+        }
         if (mongoClient) {
           await mongoClient.close();
         }
@@ -1910,7 +2897,7 @@ async function startServer() {
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
   } catch (err) {
-    console.error('[STARTUP ERROR] Failed to start server:', err);
+    console.error(`[STARTUP ERROR] ${err.message || 'Failed to start server.'}`);
     process.exit(1);
   }
 }

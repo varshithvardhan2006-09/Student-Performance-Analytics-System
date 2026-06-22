@@ -44,6 +44,18 @@ const state = {
   currentUpload: null,
   analytics: null,
   students: [],
+  sourceAnalytics: null,
+  sourceStudents: [],
+  dashboardAnalytics: null,
+  dashboardStudents: null,
+  dashboardFilters: {
+    subject: 'all',
+    student: 'all',
+  },
+  dashboardFilterOptions: {
+    subjects: [],
+    students: [],
+  },
   history: [],
   profile: null,
   profileStats: null,
@@ -286,6 +298,7 @@ function setAuthFeedback(message, type = 'info', mode = 'login') {
   element.textContent = message;
   element.className = `inline-feedback ${type}`;
   element.classList.remove('hidden');
+  element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderApiWarning() {
@@ -492,23 +505,271 @@ function getCurrentUploadId() {
   return state.currentUploadId || state.currentUpload?._id || '';
 }
 
+function getDashboardAnalytics() {
+  return state.dashboardAnalytics || state.analytics;
+}
+
+function getDashboardStudents() {
+  return Array.isArray(state.dashboardStudents) ? state.dashboardStudents : state.students;
+}
+
+function getSourceStudents() {
+  return state.sourceStudents.length ? state.sourceStudents : state.students;
+}
+
+function getSourceAnalytics() {
+  return state.sourceAnalytics || state.analytics;
+}
+
+function normalizeFilterValue(value) {
+  return String(value || 'all').trim() || 'all';
+}
+
+function resetStudentTableFilters() {
+  state.filters = {
+    search: '',
+    status: 'all',
+    category: 'all',
+    range: 'all',
+  };
+}
+
+function getActiveDashboardFilterInfo() {
+  const selectedSubject = normalizeFilterValue(state.dashboardFilters.subject);
+  const selectedStudent = normalizeFilterValue(state.dashboardFilters.student);
+  const subjectLabel = selectedSubject === 'all' ? 'All Subjects' : selectedSubject;
+  const studentOption = (state.dashboardFilterOptions.students || []).find((student) => {
+    const rollNo = String(student.rollNo || '');
+    const name = String(student.studentName || '');
+    return rollNo === selectedStudent || name === selectedStudent;
+  });
+
+  return {
+    selectedSubject,
+    selectedStudent,
+    subjectLabel,
+    studentLabel: selectedStudent === 'all'
+      ? 'All Students'
+      : studentOption?.label || studentOption?.studentName || selectedStudent,
+    hasSubject: selectedSubject !== 'all',
+    hasStudent: selectedStudent !== 'all',
+  };
+}
+
+function buildStudentPerformanceView(student, marks, rank = student.rank || 0) {
+  const upload = getCurrentUpload() || {};
+  const maxMarks = Number(upload.maxMarks) || 100;
+  const passingMarks = Number(upload.passingMarks) || 35;
+  const numericMarks = Number(marks);
+  const safeMarks = Number.isFinite(numericMarks) ? numericMarks : 0;
+  const percentage = Number(((safeMarks / maxMarks) * 100).toFixed(2));
+  const status = safeMarks >= passingMarks ? 'Pass' : 'Fail';
+  let category = 'Average Performer';
+
+  if (status === 'Fail') category = 'Failed';
+  else if (percentage > 80) category = 'Top Performer';
+  else if (percentage < 40) category = 'Weak Student';
+
+  return {
+    ...student,
+    marks: Number(safeMarks.toFixed(2)),
+    percentage,
+    status,
+    category,
+    rank,
+  };
+}
+
+function calculateAnalyticsFromStudents(students, reportType = 'single') {
+  const totalStudents = students.length;
+  const marksDistribution = {
+    range_0_35: 0,
+    range_36_50: 0,
+    range_51_70: 0,
+    range_71_85: 0,
+    range_86_100: 0,
+  };
+
+  if (!totalStudents) {
+    return {
+      totalStudents: 0,
+      passedStudents: 0,
+      failedStudents: 0,
+      averageMarks: 0,
+      highestMarks: 0,
+      lowestMarks: 0,
+      passPercentage: 0,
+      failPercentage: 0,
+      marksDistribution,
+      reportType,
+      subjectSummary: [],
+    };
+  }
+
+  const passedStudents = students.filter((student) => String(student.status).toLowerCase() === 'pass').length;
+  const failedStudents = totalStudents - passedStudents;
+  const marks = students.map((student) => Number(student.marks) || 0);
+
+  students.forEach((student) => {
+    const percentage = Number(student.percentage) || 0;
+    if (percentage <= 35) marksDistribution.range_0_35 += 1;
+    else if (percentage <= 50) marksDistribution.range_36_50 += 1;
+    else if (percentage <= 70) marksDistribution.range_51_70 += 1;
+    else if (percentage <= 85) marksDistribution.range_71_85 += 1;
+    else marksDistribution.range_86_100 += 1;
+  });
+
+  return {
+    totalStudents,
+    passedStudents,
+    failedStudents,
+    averageMarks: Number((marks.reduce((sum, mark) => sum + mark, 0) / totalStudents).toFixed(2)),
+    highestMarks: Math.max(...marks),
+    lowestMarks: Math.min(...marks),
+    passPercentage: Number(((passedStudents / totalStudents) * 100).toFixed(2)),
+    failPercentage: Number(((failedStudents / totalStudents) * 100).toFixed(2)),
+    marksDistribution,
+    reportType,
+    subjectSummary: [],
+  };
+}
+
+function calculateLocalDashboardFilter() {
+  const sourceStudents = getSourceStudents();
+  const sourceAnalytics = getSourceAnalytics();
+  const subject = normalizeFilterValue(state.dashboardFilters.subject);
+  const student = normalizeFilterValue(state.dashboardFilters.student);
+  const subjectNames = getSubjectNamesFrom(sourceStudents, sourceAnalytics);
+  const normalizedSubject = subject.toLowerCase();
+  const normalizedStudent = student.toLowerCase();
+  const selectedSubjectName = subjectNames.find((name) => name.toLowerCase() === normalizedSubject);
+
+  let filteredStudents = sourceStudents.filter((item) => {
+    if (normalizedStudent === 'all') return true;
+    return String(item.rollNo || '').toLowerCase() === normalizedStudent
+      || String(item.studentName || '').toLowerCase() === normalizedStudent;
+  });
+
+  if (selectedSubjectName) {
+    filteredStudents = filteredStudents
+      .map((item) => {
+        const value = item.subjectMarks?.[selectedSubjectName];
+        if (value === undefined || value === null || value === '') return null;
+        return buildStudentPerformanceView({ ...item, selectedSubject: selectedSubjectName }, value);
+      })
+      .filter(Boolean);
+  } else {
+    filteredStudents = filteredStudents.map((item) => buildStudentPerformanceView(item, item.marks));
+  }
+
+  filteredStudents.sort((left, right) => Number(right.marks) - Number(left.marks));
+  filteredStudents.forEach((item, index) => {
+    item.rank = index + 1;
+  });
+
+  const analytics = calculateAnalyticsFromStudents(filteredStudents, subjectNames.length ? 'multiple' : 'single');
+
+  if (selectedSubjectName) {
+    const marks = filteredStudents.map((item) => Number(item.marks)).filter(Number.isFinite);
+    analytics.subjectSummary = [{
+      subjectName: selectedSubjectName,
+      averageMarks: marks.length ? Number((marks.reduce((sum, mark) => sum + mark, 0) / marks.length).toFixed(2)) : 0,
+      highestMarks: marks.length ? Math.max(...marks) : 0,
+      lowestMarks: marks.length ? Math.min(...marks) : 0,
+    }];
+  } else if (subjectNames.length) {
+    analytics.subjectSummary = getSubjectSummaryFrom(filteredStudents, { subjectSummary: [] });
+  } else {
+    analytics.subjectSummary = [];
+  }
+
+  return { analytics, students: filteredStudents };
+}
+
+function getSubjectNamesFrom(students = getSourceStudents(), analytics = getSourceAnalytics()) {
+  const names = [];
+  const addName = (name) => {
+    const label = String(name || '').trim();
+    if (label && !names.includes(label)) {
+      names.push(label);
+    }
+  };
+
+  if (Array.isArray(analytics?.subjectSummary)) {
+    analytics.subjectSummary.forEach((subject) => addName(subject.subjectName));
+  }
+
+  students.forEach((student) => {
+    if (student && typeof student.subjectMarks === 'object' && !Array.isArray(student.subjectMarks)) {
+      Object.keys(student.subjectMarks).forEach(addName);
+    }
+  });
+
+  return names;
+}
+
+function getSubjectNames() {
+  return getSubjectNamesFrom(getSourceStudents(), getSourceAnalytics());
+}
+
+function getSubjectFilterOptions() {
+  const subjectNames = getSubjectNames();
+  if (subjectNames.length) {
+    return subjectNames;
+  }
+
+  const upload = getCurrentUpload();
+  return upload?.subjectName ? [upload.subjectName] : [];
+}
+
+function getSubjectSummaryFrom(students = getDashboardStudents(), analytics = getDashboardAnalytics()) {
+  const fromAnalytics = Array.isArray(analytics?.subjectSummary) ? analytics.subjectSummary : [];
+  if (fromAnalytics.length) {
+    return fromAnalytics;
+  }
+
+  const subjectNames = getSubjectNamesFrom(students, analytics);
+  return subjectNames.map((subjectName) => {
+    const marks = students
+      .map((student) => Number(student.subjectMarks?.[subjectName]))
+      .filter(Number.isFinite);
+    const total = marks.reduce((sum, mark) => sum + mark, 0);
+    return {
+      subjectName,
+      averageMarks: marks.length ? Number((total / marks.length).toFixed(2)) : 0,
+      highestMarks: marks.length ? Math.max(...marks) : 0,
+      lowestMarks: marks.length ? Math.min(...marks) : 0,
+    };
+  });
+}
+
+function getSubjectSummary() {
+  return getSubjectSummaryFrom(getDashboardStudents(), getDashboardAnalytics());
+}
+
+function formatSubjectMark(student, subjectName) {
+  const value = student?.subjectMarks?.[subjectName];
+  const number = Number(value);
+  return Number.isFinite(number) ? number : '-';
+}
+
 function getAverageMarks() {
-  const number = Number(state.analytics?.averageMarks);
+  const number = Number(getDashboardAnalytics()?.averageMarks);
   return Number.isFinite(number) ? number : 0;
 }
 
 function getWeakCount() {
-  return state.students.filter((student) => Number(student.percentage) < 40 || String(student.category || '').toLowerCase().includes('weak')).length;
+  return getDashboardStudents().filter((student) => Number(student.percentage) < 40 || String(student.category || '').toLowerCase().includes('weak')).length;
 }
 
 function getTopPerformers(limit = 5) {
-  return [...state.students]
+  return [...getDashboardStudents()]
     .sort((left, right) => Number(right.marks) - Number(left.marks) || Number(left.rank) - Number(right.rank))
     .slice(0, limit);
 }
 
 function getWeakStudents(limit = 5) {
-  return [...state.students]
+  return [...getDashboardStudents()]
     .filter((student) => Number(student.percentage) < 40 || String(student.status).toLowerCase() === 'fail')
     .sort((left, right) => Number(left.marks) - Number(right.marks))
     .slice(0, limit);
@@ -516,7 +777,7 @@ function getWeakStudents(limit = 5) {
 
 function getFilteredStudents() {
   const search = state.filters.search.trim().toLowerCase();
-  return [...state.students].filter((student) => {
+  return [...getDashboardStudents()].filter((student) => {
     const rollNo = String(student.rollNo || '').toLowerCase();
     const studentName = String(student.studentName || '').toLowerCase();
     const status = String(student.status || '').toLowerCase();
@@ -550,7 +811,7 @@ function getCategoryCounts() {
     Failed: 0,
   };
 
-  for (const student of state.students) {
+  for (const student of getDashboardStudents()) {
     if (counts[student.category] !== undefined) {
       counts[student.category] += 1;
     } else if (String(student.status).toLowerCase() === 'pass') {
@@ -630,8 +891,8 @@ function renderCharts() {
     return;
   }
 
-  const analytics = state.analytics;
-  const students = state.students;
+  const analytics = getDashboardAnalytics();
+  const students = getDashboardStudents();
   if (!analytics || !students.length) {
     return;
   }
@@ -792,12 +1053,12 @@ function renderCharts() {
 }
 
 function renderSummaryCards() {
-  const analytics = state.analytics;
+  const analytics = getDashboardAnalytics();
   if (!analytics) {
     return '';
   }
 
-  const total = analytics.totalStudents || state.students.length || 0;
+  const total = analytics.totalStudents || getDashboardStudents().length || 0;
   const weak = getWeakCount();
 
   const cards = [
@@ -819,6 +1080,139 @@ function renderSummaryCards() {
   `).join('');
 }
 
+function renderDashboardFilters() {
+  const subjectOptions = state.dashboardFilterOptions.subjects.length
+    ? state.dashboardFilterOptions.subjects
+    : getSubjectFilterOptions();
+  const studentOptions = state.dashboardFilterOptions.students.length
+    ? state.dashboardFilterOptions.students
+    : getSourceStudents().map((student) => ({
+        rollNo: String(student.rollNo || ''),
+        studentName: String(student.studentName || ''),
+        label: `${student.studentName} (${student.rollNo})`,
+      }));
+  const selectedSubject = normalizeFilterValue(state.dashboardFilters.subject);
+  const selectedStudent = normalizeFilterValue(state.dashboardFilters.student);
+
+  return `
+    <section class="dashboard-filter-card">
+      <div>
+        <p class="eyebrow">Dashboard Filters</p>
+        <h3>Refine Analytics View</h3>
+      </div>
+      <div class="dashboard-filter-grid">
+        <label class="filter-field">
+          <span>Subject</span>
+          <select id="dashboardSubjectFilter">
+            <option value="all"${selectedSubject === 'all' ? ' selected' : ''}>All Subjects</option>
+            ${subjectOptions.map((subjectName) => `
+              <option value="${escapeHtml(subjectName)}"${selectedSubject === subjectName ? ' selected' : ''}>${escapeHtml(subjectName)}</option>
+            `).join('')}
+          </select>
+        </label>
+        <label class="filter-field">
+          <span>Student</span>
+          <select id="dashboardStudentFilter">
+            <option value="all"${selectedStudent === 'all' ? ' selected' : ''}>All Students</option>
+            ${studentOptions.map((student) => `
+              <option value="${escapeHtml(student.rollNo)}"${selectedStudent === student.rollNo ? ' selected' : ''}>${escapeHtml(student.label || `${student.studentName} (${student.rollNo})`)}</option>
+            `).join('')}
+          </select>
+        </label>
+        <button class="ghost-btn filter-reset-btn" type="button" data-dashboard-filter-reset>Reset Filters</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderActiveFilterSummary() {
+  const info = getActiveDashboardFilterInfo();
+  if (!info.hasSubject && !info.hasStudent) {
+    return '';
+  }
+
+  const students = getDashboardStudents();
+  const selectedStudent = info.hasStudent && students.length === 1 ? students[0] : null;
+  const subjectText = info.hasSubject ? info.subjectLabel : 'all subjects';
+  const studentText = info.hasStudent ? info.studentLabel : 'all students';
+
+  return `
+    <section class="active-filter-card">
+      <div>
+        <p class="eyebrow">Filtered Result</p>
+        <h3>Showing ${escapeHtml(studentText)} in ${escapeHtml(subjectText)}</h3>
+        <p>${escapeHtml(students.length)} matching record${students.length === 1 ? '' : 's'} found from the selected filters.</p>
+      </div>
+      <div class="active-filter-chips">
+        <span class="badge">Subject: ${escapeHtml(info.subjectLabel)}</span>
+        <span class="badge">Student: ${escapeHtml(info.studentLabel)}</span>
+      </div>
+      ${selectedStudent ? `
+        <div class="exact-result-grid">
+          <article>
+            <span>Roll No</span>
+            <strong>${escapeHtml(selectedStudent.rollNo)}</strong>
+          </article>
+          <article>
+            <span>Marks</span>
+            <strong>${escapeHtml(selectedStudent.marks)}</strong>
+          </article>
+          <article>
+            <span>Percentage</span>
+            <strong>${escapeHtml(formatPercent(selectedStudent.percentage))}</strong>
+          </article>
+          <article>
+            <span>Status</span>
+            <strong>${escapeHtml(selectedStudent.status)}</strong>
+          </article>
+          <article>
+            <span>Category</span>
+            <strong>${escapeHtml(selectedStudent.category)}</strong>
+          </article>
+        </div>
+      ` : ''}
+    </section>
+  `;
+}
+
+function renderSubjectSummaryPanel() {
+  const subjects = getSubjectSummary();
+  if (!subjects.length) {
+    return '';
+  }
+
+  return `
+    <section class="table-card subject-summary-card">
+      <div class="table-head compact">
+        <div>
+          <p class="eyebrow">Subject Wise Analysis</p>
+          <h3>Multi-Subject Performance</h3>
+        </div>
+      </div>
+      <table class="data-table subject-summary-table">
+        <thead>
+          <tr>
+            <th>Subject</th>
+            <th>Average Marks</th>
+            <th>Highest Marks</th>
+            <th>Lowest Marks</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${subjects.map((subject) => `
+            <tr>
+              <td><strong>${escapeHtml(subject.subjectName)}</strong></td>
+              <td>${escapeHtml(formatPercent(subject.averageMarks || 0))}</td>
+              <td>${escapeHtml(subject.highestMarks ?? 0)}</td>
+              <td>${escapeHtml(subject.lowestMarks ?? 0)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </section>
+  `;
+}
+
 function renderUploadPage() {
   return `
     <section class="page">
@@ -826,12 +1220,13 @@ function renderUploadPage() {
         <div>
           <p class="eyebrow">Home / Upload</p>
           <h1 class="page-title">Upload Subject Marks</h1>
-          <p class="page-copy">Upload marks file for a single subject to generate performance analytics.</p>
+          <p class="page-copy">Upload single-subject marks files or structured multi-subject reports to generate performance analytics.</p>
           <div class="hero-info">
             <span class="badge">CSV</span>
             <span class="badge">Excel</span>
             <span class="badge">Structured PDF</span>
-            <span class="badge">Single subject</span>
+            <span class="badge">Multi-file ready</span>
+            <span class="badge">Single / Multiple Subjects</span>
           </div>
         </div>
         <div class="hero-actions">
@@ -853,8 +1248,15 @@ function renderUploadPage() {
           <form id="uploadForm" class="upload-form-shell">
             <div class="upload-form-grid">
               <label class="field">
-                <span>Subject Name *</span>
-                <input name="subjectName" type="text" placeholder="Enter subject name" required>
+                <span>Subject Type *</span>
+                <select name="subjectType" id="subjectType" required>
+                  <option value="single" selected>Single Subject</option>
+                  <option value="multiple">Multiple Subjects</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Subject / Report Name *</span>
+                <input name="subjectName" type="text" placeholder="Example: DBMS or Semester 1 report" required>
               </label>
               <label class="field">
                 <span>Class *</span>
@@ -865,6 +1267,8 @@ function renderUploadPage() {
                   <option>BSc IT</option>
                   <option>BCom</option>
                   <option>BA</option>
+                  <option>B.Tech</option>
+                  <option>B.E</option>
                   <option>MCA</option>
                   <option>MSc</option>
                   <option>Other</option>
@@ -888,8 +1292,8 @@ function renderUploadPage() {
                 <span>or</span>
                 <button class="ghost-btn" type="button" id="chooseFileBtn">Choose File</button>
                 <small>Supported formats: CSV, Excel (.xlsx, .xls), PDF (structured)</small>
-                <small>Maximum file size: 10MB</small>
-                <input id="marksFile" name="file" type="file" accept=".csv,.xlsx,.xls,.pdf" class="hidden">
+                <small>Maximum file size: 10MB per file</small>
+                <input id="marksFile" name="file" type="file" accept=".csv,.xlsx,.xls,.pdf" class="hidden" multiple>
               </label>
               <div class="upload-meta" id="selectedFileMeta">No file selected yet.</div>
             </div>
@@ -906,9 +1310,10 @@ function renderUploadPage() {
             <ul class="check-list">
               <li><span class="check-icon">✓</span><span>File must be CSV, Excel, or structured PDF.</span></li>
               <li><span class="check-icon">✓</span><span>File should not be empty.</span></li>
-              <li><span class="check-icon">✓</span><span>Required columns: Roll No, Student Name, Marks.</span></li>
+              <li><span class="check-icon">✓</span><span>Required columns: Roll No, Student Name, and Marks or subject columns.</span></li>
               <li><span class="check-icon">✓</span><span>Marks should be numeric and within the maximum marks range.</span></li>
               <li><span class="check-icon">✓</span><span>No duplicate roll numbers.</span></li>
+              <li><span class="check-icon">✓</span><span>Multi-subject reports may include one column per subject.</span></li>
             </ul>
           </section>
 
@@ -918,14 +1323,14 @@ function renderUploadPage() {
             <ul class="check-list">
               <li><span class="check-icon">1</span><span><strong>Roll No</strong></span></li>
               <li><span class="check-icon">2</span><span><strong>Student Name</strong></span></li>
-              <li><span class="check-icon">3</span><span><strong>Marks</strong></span></li>
+              <li><span class="check-icon">3</span><span><strong>Marks or subject columns</strong></span></li>
             </ul>
           </section>
 
           <section class="check-card note">
             <p class="eyebrow">Note</p>
             <h3>After upload</h3>
-            <p>Once the file is processed, the system will take you to the analytics dashboard automatically.</p>
+            <p>Once the file is processed, the system will take you to the analytics dashboard automatically. For multi-subject PDFs, keep the header row with Roll No, Student Name, and each subject column.</p>
           </section>
         </aside>
       </div>
@@ -1032,7 +1437,10 @@ function renderEmptyState(title, message, buttonLabel, targetView) {
 
 function renderDashboardPage() {
   const upload = getCurrentUpload();
-  if (!upload || !state.analytics || !state.students.length) {
+  const analytics = getDashboardAnalytics();
+  const dashboardStudents = getDashboardStudents();
+  const sourceStudents = getSourceStudents();
+  if (!upload || !analytics || !sourceStudents.length) {
     return renderEmptyState(
       'No analytics loaded yet',
       'Upload a subject file or pick one from the history page to see the dashboard.',
@@ -1043,15 +1451,22 @@ function renderDashboardPage() {
 
   const passMarks = upload.passingMarks ?? 35;
   const maxMarks = upload.maxMarks ?? 100;
-  const currentAverage = Number(state.analytics.averageMarks) || 0;
+  const currentAverage = Number(analytics.averageMarks) || 0;
   const improvementRate = getImprovementRate();
   const categoryCounts = getCategoryCounts();
+  const activeFilterInfo = getActiveDashboardFilterInfo();
+  const isExactStudentSubject = activeFilterInfo.hasSubject && activeFilterInfo.hasStudent;
   const topPerformers = getTopPerformers(5);
   const weakStudents = getWeakStudents(5);
-  const filteredStudents = getFilteredStudents();
+  const filteredStudents = isExactStudentSubject ? dashboardStudents : getFilteredStudents();
   const weakCount = getWeakCount();
-  const passPercentage = Number(state.analytics.passPercentage) || 0;
-  const failPercentage = Number(state.analytics.failPercentage) || 0;
+  const passPercentage = Number(analytics.passPercentage) || 0;
+  const failPercentage = Number(analytics.failPercentage) || 0;
+  const subjectNames = getSubjectNames();
+  const selectedSubject = normalizeFilterValue(state.dashboardFilters.subject);
+  const visibleSubjectNames = selectedSubject !== 'all' ? subjectNames.filter((subjectName) => subjectName === selectedSubject) : subjectNames;
+  const isMultiSubject = upload.subjectType === 'multiple' || subjectNames.length > 0;
+  const subjectHeaderCells = isMultiSubject ? visibleSubjectNames.map((subjectName) => `<th>${escapeHtml(subjectName)}</th>`).join('') : '';
 
   return `
     <section class="page">
@@ -1061,9 +1476,10 @@ function renderDashboardPage() {
           <h1 class="page-title">Subject: ${escapeHtml(upload.subjectName)}</h1>
           <p class="page-copy">Class: ${escapeHtml(upload.className)} | Uploaded on: ${escapeHtml(formatDate(upload.uploadDate))}</p>
           <div class="hero-info">
+            <span class="badge">Mode: ${escapeHtml(upload.subjectType === 'multiple' ? 'Multiple Subjects' : 'Single Subject')}</span>
             <span class="badge">Pass Marks: ${escapeHtml(passMarks)}</span>
             <span class="badge">Max Marks: ${escapeHtml(maxMarks)}</span>
-            <span class="badge">Records: ${escapeHtml(state.students.length)}</span>
+            <span class="badge">Records: ${escapeHtml(dashboardStudents.length)}</span>
           </div>
         </div>
         <div class="hero-actions">
@@ -1073,6 +1489,10 @@ function renderDashboardPage() {
         </div>
       </div>
 
+      ${renderDashboardFilters()}
+
+      ${renderActiveFilterSummary()}
+
       <div class="summary-grid">
         ${renderSummaryCards()}
       </div>
@@ -1080,6 +1500,8 @@ function renderDashboardPage() {
       <div class="subnote-bar">
         Pass Marks: ${escapeHtml(passMarks)} | Max Marks: ${escapeHtml(maxMarks)} | Pass Percentage: ${escapeHtml(formatPercent(passPercentage))} | Fail Percentage: ${escapeHtml(formatPercent(failPercentage))}
       </div>
+
+      ${isMultiSubject ? renderSubjectSummaryPanel() : ''}
 
       <div class="section-grid">
         <section class="chart-card">
@@ -1109,8 +1531,8 @@ function renderDashboardPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Top Performers</p>
-              <h3>Top 5 Students</h3>
+              <p class="eyebrow">${isExactStudentSubject ? 'Selected Record' : 'Top Performers'}</p>
+              <h3>${isExactStudentSubject ? 'Selected Student Score' : 'Top 5 Students'}</h3>
             </div>
           </div>
           <div class="chart-wrap">
@@ -1123,8 +1545,8 @@ function renderDashboardPage() {
         <section class="chart-card large">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Performance Table</p>
-              <h3>Top Performers</h3>
+              <p class="eyebrow">${isExactStudentSubject ? 'Exact Match' : 'Performance Table'}</p>
+              <h3>${isExactStudentSubject ? 'Selected Student Performance' : 'Top Performers'}</h3>
             </div>
           </div>
           <div class="stack-list">
@@ -1144,8 +1566,8 @@ function renderDashboardPage() {
         <section class="chart-card large">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Support List</p>
-              <h3>Weak Students</h3>
+              <p class="eyebrow">${isExactStudentSubject ? 'Student Status' : 'Support List'}</p>
+              <h3>${isExactStudentSubject ? 'Support Status' : 'Weak Students'}</h3>
             </div>
           </div>
           <div class="stack-list">
@@ -1158,7 +1580,7 @@ function renderDashboardPage() {
                 </div>
                 <strong>${escapeHtml(formatPercent(student.percentage))}</strong>
               </div>
-            `).join('') : `<div class="upload-empty"><strong>No weak students found</strong><p>All students are above the weak-student threshold for this upload.</p></div>`}
+            `).join('') : `<div class="upload-empty"><strong>${isExactStudentSubject ? 'Selected student is not weak' : 'No weak students found'}</strong><p>${isExactStudentSubject ? 'This student is above the weak-student threshold for the selected subject.' : 'All students are above the weak-student threshold for this upload.'}</p></div>`}
           </div>
         </section>
 
@@ -1205,6 +1627,7 @@ function renderDashboardPage() {
               </select>
             </div>
           </div>
+        </div>
 
           <table class="data-table">
             <thead>
@@ -1212,28 +1635,38 @@ function renderDashboardPage() {
                 <th>Rank</th>
                 <th>Roll No</th>
                 <th>Student Name</th>
-                <th>Marks</th>
+                ${subjectHeaderCells}
+                <th>${isMultiSubject ? 'Average Marks' : 'Marks'}</th>
                 <th>Percentage</th>
                 <th>Status</th>
                 <th>Category</th>
               </tr>
             </thead>
             <tbody>
-              ${filteredStudents.map((student) => `
+              ${filteredStudents.length ? filteredStudents.map((student) => `
                 <tr>
                   <td>${escapeHtml(student.rank)}</td>
                   <td>${escapeHtml(student.rollNo)}</td>
                   <td>${escapeHtml(student.studentName)}</td>
+                  ${isMultiSubject ? visibleSubjectNames.map((subjectName) => `<td>${escapeHtml(formatSubjectMark(student, subjectName))}</td>`).join('') : ''}
                   <td>${escapeHtml(student.marks)}</td>
                   <td>${escapeHtml(formatPercent(student.percentage))}</td>
                   <td><span class="status-pill ${getStatusClass(student.status)}">${escapeHtml(student.status)}</span></td>
                   <td><span class="category-pill ${getCategoryClass(student.category)}">${escapeHtml(student.category)}</span></td>
                 </tr>
-              `).join('')}
+              `).join('') : `
+                <tr>
+                  <td colspan="${escapeHtml(isMultiSubject ? visibleSubjectNames.length + 7 : 7)}">
+                    <div class="upload-empty">
+                      <strong>No matching students found</strong>
+                      <p>Change the subject or student filter to see more records.</p>
+                    </div>
+                  </td>
+                </tr>
+              `}
             </tbody>
           </table>
         </section>
-      </div>
     </section>
   `;
 }
@@ -1574,7 +2007,7 @@ function renderProfilePage() {
         <article class="profile-card">
           <p class="eyebrow">Access Level</p>
           <strong>${escapeHtml(profile.role || 'teacher')}</strong>
-          <p>You can upload a single subject file, review analytics, and export reports.</p>
+          <p>You can upload one or more subject files, review analytics, and export reports.</p>
           <div class="profile-tag">Protected by JWT</div>
         </article>
 
@@ -1658,11 +2091,58 @@ async function loadUploadData(uploadId) {
   state.currentUpload = uploadResponse.upload;
   state.analytics = uploadResponse.analytics;
   state.students = Array.isArray(studentsResponse.students) ? studentsResponse.students : [];
+  state.sourceAnalytics = state.analytics;
+  state.sourceStudents = state.students;
+  state.dashboardAnalytics = state.analytics;
+  state.dashboardStudents = state.students;
+  state.dashboardFilters = {
+    subject: 'all',
+    student: 'all',
+  };
+  state.dashboardFilterOptions = {
+    subjects: getSubjectFilterOptions(),
+    students: state.sourceStudents.map((student) => ({
+      rollNo: String(student.rollNo || ''),
+      studentName: String(student.studentName || ''),
+      label: `${student.studentName} (${student.rollNo})`,
+    })),
+  };
   state.currentUploadId = uploadId;
   sessionStorage.setItem(STORAGE_KEYS.currentUploadId, uploadId);
   state.insights = null;
   state.queryReply = '';
   return uploadResponse.upload;
+}
+
+async function loadFilteredDashboardData() {
+  const uploadId = getCurrentUploadId();
+  if (!uploadId) {
+    return;
+  }
+
+  const subject = normalizeFilterValue(state.dashboardFilters.subject);
+  const student = normalizeFilterValue(state.dashboardFilters.student);
+  const params = new URLSearchParams({ subject, student });
+
+  try {
+    const response = await requestJson(`/api/analytics/${encodeURIComponent(uploadId)}/filtered?${params.toString()}`);
+    state.dashboardAnalytics = response.analytics || state.analytics;
+    state.dashboardStudents = Array.isArray(response.students) ? response.students : state.students;
+    state.dashboardFilterOptions = {
+      subjects: response.filters?.subjectOptions || getSubjectFilterOptions(),
+      students: response.filters?.studentOptions || state.dashboardFilterOptions.students,
+    };
+  } catch (error) {
+    console.warn('[DASHBOARD FILTER FALLBACK]', error.message);
+    const fallback = calculateLocalDashboardFilter();
+    state.dashboardAnalytics = fallback.analytics;
+    state.dashboardStudents = fallback.students;
+  }
+}
+
+async function applyDashboardFilters() {
+  await loadFilteredDashboardData();
+  renderPage();
 }
 
 async function ensureInsights(force = false) {
@@ -1724,10 +2204,10 @@ function startProcessing(fileName, fileSize) {
     if (progress < 85) increment = 3;
     state.processing.progress = Math.min(95, progress + increment);
 
-    if (state.processing.progress < 25) state.processing.message = 'File uploaded successfully.';
-    else if (state.processing.progress < 55) state.processing.message = 'Validating file structure.';
-    else if (state.processing.progress < 85) state.processing.message = 'Calculating analytics and rankings.';
-    else state.processing.message = 'Storing data and preparing the dashboard.';
+    if (state.processing.progress < 25) state.processing.message = 'Uploading file to the backend.';
+    else if (state.processing.progress < 55) state.processing.message = 'Studying file structure and validating columns.';
+    else if (state.processing.progress < 85) state.processing.message = 'Understanding marks data and calculating analytics.';
+    else state.processing.message = 'Saving verified data and preparing the dashboard.';
 
     renderPage();
   }, 320);
@@ -1795,6 +2275,7 @@ async function handleLogin(event) {
       }
     }
   } catch (error) {
+    setAuthMode('login');
     setAuthFeedback(error.message, 'error', 'login');
   }
 }
@@ -1833,6 +2314,7 @@ async function handleSignup(event) {
     }
     setAuthFeedback('Account created successfully. Please log in with your email and password.', 'success', 'login');
   } catch (error) {
+    setAuthMode('signup');
     setAuthFeedback(error.message, 'error', 'signup');
   }
 }
@@ -1849,9 +2331,9 @@ async function submitUploadForm(form) {
 
   const formData = new FormData(form);
   const fileInput = form.querySelector('input[name="file"]');
-  const file = fileInput?.files?.[0];
+  const files = Array.from(fileInput?.files || []);
 
-  if (!file) {
+  if (!files.length) {
     const feedback = document.getElementById('uploadFeedback');
     if (feedback) {
       feedback.textContent = 'Please choose a marks file first.';
@@ -1862,7 +2344,9 @@ async function submitUploadForm(form) {
   }
 
   const startedAt = Date.now();
-  startProcessing(file.name, file.size);
+  const totalSize = files.reduce((sum, currentFile) => sum + (currentFile?.size || 0), 0);
+  const fileLabel = files.length === 1 ? files[0].name : `${files.length} files`;
+  startProcessing(fileLabel, totalSize);
 
   try {
     const response = await requestJson('/api/upload', {
@@ -1911,18 +2395,34 @@ async function handleUpload(event) {
   await submitUploadForm(event.currentTarget);
 }
 
-function updateSelectedFileLabel(file) {
+function updateSelectedFileLabel(fileOrFiles) {
   const label = document.getElementById('selectedFileMeta');
   if (!label) {
     return;
   }
 
-  if (file) {
-    const size = Math.max(1, Math.round(file.size / 1024));
-    label.textContent = `${file.name} • ${size} KB`;
-  } else {
-    label.textContent = 'No file selected yet.';
+  const files = Array.isArray(fileOrFiles)
+    ? fileOrFiles
+    : fileOrFiles?.length
+      ? Array.from(fileOrFiles)
+      : fileOrFiles
+        ? [fileOrFiles]
+        : [];
+
+  if (files.length === 1) {
+    const size = Math.max(1, Math.round((files[0].size || 0) / 1024));
+    label.textContent = `${files[0].name} • ${size} KB`;
+    return;
   }
+
+  if (files.length > 1) {
+    const totalSize = files.reduce((sum, currentFile) => sum + (currentFile?.size || 0), 0);
+    const size = Math.max(1, Math.round(totalSize / 1024));
+    label.textContent = `${files.length} files selected • ${size} KB total`;
+    return;
+  }
+
+  label.textContent = 'No file selected yet.';
 }
 
 async function handleSidebarClick(event) {
@@ -1939,6 +2439,17 @@ async function handleSidebarClick(event) {
     if (uploadForm) {
       await submitUploadForm(uploadForm);
     }
+    return;
+  }
+
+  const dashboardFilterReset = event.target.closest('[data-dashboard-filter-reset]');
+  if (dashboardFilterReset) {
+    state.dashboardFilters = {
+      subject: 'all',
+      student: 'all',
+    };
+    resetStudentTableFilters();
+    await applyDashboardFilters();
     return;
   }
 
@@ -2100,6 +2611,150 @@ function getInsightAnswer(question) {
   return state.insights?.overallSummary || fallback.overallSummary;
 }
 
+function parseQuestionRange(question) {
+  const normalized = String(question || '').toLowerCase();
+  const rangeMatch = normalized.match(/(?:between|from)?\s*(\d+(?:\.\d+)?)\s*(?:to|-|and)\s*(\d+(?:\.\d+)?)/i);
+  if (!rangeMatch) {
+    return null;
+  }
+
+  const start = Number(rangeMatch[1]);
+  const end = Number(rangeMatch[2]);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return null;
+  }
+
+  const lower = Math.min(start, end);
+  const upper = Math.max(start, end);
+  const usePercentage = normalized.includes('percent') || normalized.includes('percentage') || normalized.includes('%');
+  return { lower, upper, usePercentage };
+}
+
+function getQuestionAnswerFromData(question) {
+  const normalized = String(question || '').toLowerCase();
+  const analytics = state.analytics || {};
+  const students = Array.isArray(state.students) ? state.students : [];
+  const topStudents = getTopPerformers(5);
+  const failedStudents = students.filter((student) => String(student.status).toLowerCase() === 'fail').slice(0, 5);
+  const weakStudents = getWeakStudents(5);
+  const range = parseQuestionRange(question);
+
+  if (range) {
+    const matches = students.filter((student) => {
+      const value = range.usePercentage ? Number(student.percentage) : Number(student.marks);
+      return Number.isFinite(value) && value >= range.lower && value <= range.upper;
+    });
+
+    if (!matches.length) {
+      return `No students were found in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range.`;
+    }
+
+    return `Students in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range: ${matches
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${formatPercent(student.percentage)})`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('failed') || normalized.includes('failure') || normalized.includes('students who are failed')) {
+    if (!failedStudents.length) {
+      return 'No failed students were found in the current upload.';
+    }
+    return `Failed students: ${failedStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${student.marks} marks, ${formatPercent(student.percentage)})`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('top') || normalized.includes('best') || normalized.includes('highest')) {
+    if (!topStudents.length) {
+      return 'No top performers are available for the current upload yet.';
+    }
+    return `Top performers: ${topStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${formatPercent(student.percentage)})`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('weak') || normalized.includes('risk') || normalized.includes('fail')) {
+    if (!weakStudents.length) {
+      return 'No weak students were found in the current upload.';
+    }
+    return `Weak students: ${weakStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${formatPercent(student.percentage)})`)
+      .join('; ')}.`;
+  }
+
+  if (normalized.includes('pass') || normalized.includes('fail')) {
+    return `Pass/fail summary: ${analytics.passedStudents || 0} passed and ${analytics.failedStudents || 0} failed out of ${analytics.totalStudents || students.length || 0} students. Pass percentage is ${formatPercent(analytics.passPercentage || 0)}.`;
+  }
+
+  if (normalized.includes('average') || normalized.includes('mean')) {
+    return `The class average is ${formatPercent(analytics.averageMarks || 0)}. The highest mark is ${analytics.highestMarks ?? 0} and the lowest mark is ${analytics.lowestMarks ?? 0}.`;
+  }
+
+  return '';
+}
+
+async function getGroqAnswer(question) {
+  const uploadId = getCurrentUploadId();
+  if (!uploadId) {
+    return '';
+  }
+
+  const analytics = state.analytics || {};
+  const students = Array.isArray(state.students) ? state.students : [];
+  const subjectName = state.currentSubject?.name || state.currentUpload?.subjectName || 'Current Subject';
+  const context = {
+    subjectName,
+    analytics: {
+      totalStudents: analytics.totalStudents || students.length || 0,
+      passedStudents: analytics.passedStudents || 0,
+      failedStudents: analytics.failedStudents || 0,
+      averageMarks: analytics.averageMarks || 0,
+      highestMarks: analytics.highestMarks || 0,
+      lowestMarks: analytics.lowestMarks || 0,
+      passPercentage: analytics.passPercentage || 0,
+      failPercentage: analytics.failPercentage || 0,
+      marksDistribution: analytics.marksDistribution || {},
+    },
+    topStudents: getTopPerformers(10).map((student) => ({
+      rollNo: student.rollNo,
+      studentName: student.studentName,
+      marks: student.marks,
+      percentage: student.percentage,
+      status: student.status,
+      category: student.category,
+      rank: student.rank,
+    })),
+    weakStudents: getWeakStudents(10).map((student) => ({
+      rollNo: student.rollNo,
+      studentName: student.studentName,
+      marks: student.marks,
+      percentage: student.percentage,
+      status: student.status,
+      category: student.category,
+      rank: student.rank,
+    })),
+    students: students.slice(0, 200).map((student) => ({
+      rollNo: student.rollNo,
+      studentName: student.studentName,
+      marks: student.marks,
+      percentage: student.percentage,
+      status: student.status,
+      category: student.category,
+      rank: student.rank,
+    })),
+  };
+
+  try {
+    const response = await requestJson(`/api/ai-query/${encodeURIComponent(uploadId)}`, {
+      method: 'POST',
+      body: { question, context },
+    });
+    return String(response?.answer || '').trim();
+  } catch (error) {
+    console.warn('[QUERY API ERROR]', error.message);
+    return '';
+  }
+}
+
 async function submitQueryForm(form) {
   const input = form?.querySelector('#queryInput');
   const answer = document.getElementById('queryAnswer');
@@ -2111,11 +2766,22 @@ async function submitQueryForm(form) {
     return;
   }
 
-  const response = getInsightAnswer(question);
-  state.queryReply = response;
+  const localResponse = getQuestionAnswerFromData(question) || getInsightAnswer(question);
+  state.queryReply = localResponse;
   if (answer) {
-    answer.innerHTML = escapeHtml(response).replace(/\n/g, '<br>');
+    answer.innerHTML = escapeHtml(localResponse).replace(/\n/g, '<br>');
   }
+
+  void (async () => {
+    const apiResponse = await getGroqAnswer(question);
+    const response = apiResponse || localResponse;
+    if (response && response !== localResponse) {
+      state.queryReply = response;
+      if (answer) {
+        answer.innerHTML = escapeHtml(response).replace(/\n/g, '<br>');
+      }
+    }
+  })();
 }
 
 function openSidebar() {
@@ -2198,7 +2864,7 @@ async function initializeApp() {
     const marksFileInput = document.getElementById('marksFile');
     if (event.dataTransfer?.files?.length && marksFileInput) {
       marksFileInput.files = event.dataTransfer.files;
-      updateSelectedFileLabel(marksFileInput.files[0]);
+      updateSelectedFileLabel(marksFileInput.files);
     }
   });
   pageHost.addEventListener('keydown', async (event) => {
@@ -2229,9 +2895,9 @@ async function initializeApp() {
     }
   });
 
-  pageHost.addEventListener('change', (event) => {
+  pageHost.addEventListener('change', async (event) => {
     if (event.target.matches('#marksFile')) {
-      updateSelectedFileLabel(event.target.files?.[0] || null);
+      updateSelectedFileLabel(event.target.files || null);
       const feedback = document.getElementById('uploadFeedback');
       if (feedback) {
         feedback.textContent = '';
@@ -2252,6 +2918,18 @@ async function initializeApp() {
     if (event.target.matches('#rangeFilter')) {
       state.filters.range = event.target.value;
       renderPage();
+      return;
+    }
+    if (event.target.matches('#dashboardSubjectFilter')) {
+      state.dashboardFilters.subject = event.target.value;
+      resetStudentTableFilters();
+      await applyDashboardFilters();
+      return;
+    }
+    if (event.target.matches('#dashboardStudentFilter')) {
+      state.dashboardFilters.student = event.target.value;
+      resetStudentTableFilters();
+      await applyDashboardFilters();
       return;
     }
     if (event.target.matches('#reportTypeSelect')) {
@@ -2303,6 +2981,24 @@ async function handleLogout() {
     category: 'all',
     range: 'all',
   };
+  state.currentUploadId = '';
+  state.currentUpload = null;
+  state.analytics = null;
+  state.students = [];
+  state.sourceAnalytics = null;
+  state.sourceStudents = [];
+  state.dashboardAnalytics = null;
+  state.dashboardStudents = null;
+  state.dashboardFilters = {
+    subject: 'all',
+    student: 'all',
+  };
+  state.dashboardFilterOptions = {
+    subjects: [],
+    students: [],
+  };
+  state.insights = null;
+  state.queryReply = '';
   setAuthMode('login');
   applyRememberedEmail();
 }

@@ -945,6 +945,125 @@ a {
   gap: 0.95rem;
 }
 
+.dashboard-filter-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 2.4fr);
+  gap: 1rem;
+  align-items: end;
+  padding: 1.05rem 1.2rem;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid rgba(83, 119, 255, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-filter-card h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.03em;
+}
+
+.dashboard-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.35fr) auto;
+  gap: 0.8rem;
+  align-items: end;
+}
+
+.filter-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.filter-field span {
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.filter-field select {
+  min-height: 54px;
+  border-radius: 16px;
+  border: 1px solid rgba(83, 119, 255, 0.22);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  padding: 0 1rem;
+  outline: none;
+  box-shadow: 0 10px 26px rgba(43, 73, 168, 0.06);
+}
+
+.filter-field select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(67, 97, 238, 0.12);
+}
+
+.filter-reset-btn {
+  min-height: 54px;
+  white-space: nowrap;
+}
+
+.active-filter-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem 1.2rem;
+  border-radius: 24px;
+  background: linear-gradient(135deg, #eef5ff 0%, #ffffff 100%);
+  border: 1px solid rgba(67, 97, 238, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+
+.active-filter-card h3 {
+  margin: 0.2rem 0 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.03em;
+}
+
+.active-filter-card p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.exact-result-grid {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 0.8rem;
+}
+
+.exact-result-grid article {
+  padding: 0.85rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(83, 119, 255, 0.14);
+}
+
+.exact-result-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.exact-result-grid strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--ink);
+  font-size: 1.1rem;
+}
+
 .summary-card {
   display: grid;
   gap: 0.55rem;
@@ -1083,6 +1202,16 @@ a {
 
 .table-card {
   grid-column: 1 / -1;
+  overflow-x: auto;
+}
+
+.table-head {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.table-head > div:first-child {
+  max-width: 48rem;
 }
 
 .table-toolbar {
@@ -1106,11 +1235,19 @@ a {
 }
 
 .data-table {
-  width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
   margin-top: 1rem;
   overflow: hidden;
   border-radius: 18px;
+}
+
+.subject-summary-card {
+  margin-bottom: 1.5rem;
+}
+
+.subject-summary-table {
+  min-width: 720px;
 }
 
 .data-table thead th {
@@ -1628,9 +1765,29 @@ a {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .dashboard-filter-card {
+    grid-template-columns: 1fr;
+  }
+
+  .active-filter-card {
+    grid-template-columns: 1fr;
+  }
+
+  .active-filter-chips {
+    justify-content: flex-start;
+  }
+
+  .exact-result-grid {
+    grid-template-columns: repeat(3, minmax(120px, 1fr));
+  }
+
   .chart-card,
   .insight-card {
     grid-column: span 6;
+  }
+
+  .table-toolbar {
+    width: 100%;
   }
 }
 
@@ -1651,6 +1808,27 @@ a {
   .insight-grid,
   .profile-grid {
     grid-template-columns: 1fr;
+  }
+
+  .table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dashboard-filter-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .exact-result-grid {
+    grid-template-columns: repeat(2, minmax(120px, 1fr));
+  }
+
+  .filter-reset-btn {
+    grid-column: 1 / -1;
+  }
+
+  .table-toolbar .toolbar-group {
+    flex-wrap: wrap;
   }
 
   .chart-card,
@@ -1694,6 +1872,14 @@ a {
 
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .exact-result-grid {
+    grid-template-columns: 1fr;
   }
 
   .section-grid,

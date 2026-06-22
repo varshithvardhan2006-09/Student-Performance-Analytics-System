@@ -9,6 +9,7 @@ A teacher-focused analytics platform for uploading one subject at a time, valida
 - Automatic validation for file type, duplicate roll numbers, and mark ranges
 - Analytics dashboard with pass/fail, marks distribution, top performers, and weak students
 - AI insights with fallback summaries when Groq is not configured
+- Natural-language AI question box for asking about the current upload
 - PDF, Excel, and CSV report downloads
 - Upload history and teacher profile pages
 
@@ -59,7 +60,7 @@ node index.js
 4. Open the app:
 
 ```text
-http://localhost:3000/index.html
+http://localhost:3000/
 ```
 
 ## Deployment
@@ -108,3 +109,4 @@ http://localhost:3000/index.html
 - The app is intentionally light-mode only.
 - Uploaded files are processed server-side and stored in MongoDB.
 - If Groq is not configured, the dashboard still shows fallback AI summaries.
+- The question box uses `POST /api/ai-query/:uploadId` to answer data questions from MongoDB and Groq when available.
