@@ -19,8 +19,11 @@
     <div class="auth-bg-shape auth-bg-left"></div>
     <div class="auth-bg-shape auth-bg-right"></div>
 
+    <div class="auth-frame">
     <div class="auth-shell">
       <div class="auth-visual">
+        <div class="auth-dot-grid dot-top" aria-hidden="true"></div>
+        <div class="auth-dot-grid dot-bottom" aria-hidden="true"></div>
         <div class="auth-logo-mark" aria-hidden="true">
           <svg viewBox="0 0 120 120" role="presentation">
             <path d="M60 10 105 32 60 54 15 32 60 10Z" fill="#102c69"/>
@@ -32,6 +35,7 @@
         </div>
 
         <h1>Student Performance<br><span>Analytics System</span></h1>
+        <span class="auth-title-line" aria-hidden="true"></span>
         <p class="auth-description">
           Analyze student performance, identify weak areas, recognize top performers, and make data-driven academic decisions.
         </p>
@@ -97,7 +101,7 @@
 
           <div class="auth-row">
             <label class="remember-row">
-              <input name="rememberMe" type="checkbox">
+              <input name="rememberMe" type="checkbox" checked>
               <span>Remember me</span>
             </label>
             <button class="link-button" type="button" data-forgot-password>Forgot Password?</button>
@@ -162,9 +166,10 @@
     </div>
 
     <footer class="auth-footer">
-      <span>Secure. Reliable. Insightful.</span>
+      <span class="footer-secure">&#128274; Secure. Reliable. Insightful.</span>
       <span>© 2024 Student Performance Analytics System. All rights reserved.</span>
     </footer>
+    </div>
   </section>
 
   <div id="appShell" class="app-shell hidden">

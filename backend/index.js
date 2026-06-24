@@ -68,6 +68,9 @@ const MONGODB_DB = process.env.MONGODB_DB || 'student_analytics';
 const USERS_COLLECTION = process.env.MONGODB_USERS_COLLECTION || 'users';
 const JWT_SECRET = process.env.JWT_SECRET || 'default_jwt_secret_change_me';
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const MONGO_CLIENT_OPTIONS = {
+  serverSelectionTimeoutMS: parseInt(process.env.MONGODB_TIMEOUT_MS || '5000', 10),
+};
 const DEMO_TEACHER = {
   fullName: process.env.DEMO_TEACHER_NAME || 'Demo Teacher',
   email: process.env.DEMO_TEACHER_EMAIL || 'demo.teacher@saps.local',
@@ -249,7 +252,7 @@ async function ensureLocalMongoProcess() {
       throw new Error('Local MongoDB is not running and mongod.exe was not found. Start MongoDB Server or set MONGODB_URI to a cloud database.');
     }
 
-    const localDataDir = process.env.LOCAL_MONGODB_DATA_DIR || path.join('C:', 'tmp', 'student-analytics-mongodb');
+    const localDataDir = process.env.LOCAL_MONGODB_DATA_DIR || path.join(__dirname, '.mongodb-data');
     fs.mkdirSync(localDataDir, { recursive: true });
     fs.mkdirSync(path.join(localDataDir, 'log'), { recursive: true });
     fs.mkdirSync(path.join(localDataDir, 'db'), { recursive: true });
@@ -304,13 +307,13 @@ async function initializeDatabase() {
 
   console.log('[STARTUP] Connecting to MongoDB...');
   try {
-    mongoClient = new MongoClient(MONGODB_URI);
+    mongoClient = new MongoClient(MONGODB_URI, MONGO_CLIENT_OPTIONS);
     await mongoClient.connect();
   } catch (error) {
     if (isLocalMongoUri(MONGODB_URI) && isConnectionRefusedError(error)) {
       console.warn('[STARTUP] Local MongoDB is not running. Attempting auto-start...');
       await ensureLocalMongoProcess();
-      mongoClient = new MongoClient(MONGODB_URI);
+      mongoClient = new MongoClient(MONGODB_URI, MONGO_CLIENT_OPTIONS);
       await mongoClient.connect();
     } else {
       throw error;
@@ -1165,6 +1168,10 @@ function processStudents(records, maxMarks, passingMarks, reportType = 'single')
  * Calculate analytics from processed students
  */
 function calculateAnalytics(students, maxMarks, reportType = 'single') {
+  if (!Array.isArray(students) || students.length === 0) {
+    return calculateAnalyticsForSubset([], maxMarks, reportType);
+  }
+
   const totalStudents = students.length;
   const passedStudents = students.filter((s) => s.status === 'Pass').length;
   const failedStudents = students.filter((s) => s.status === 'Fail').length;
@@ -1368,6 +1375,7 @@ function buildQueryStudentList(students = []) {
       status: String(student.status ?? '').trim(),
       category: String(student.category ?? '').trim(),
       rank: normalizeMarksValue(student.rank) ?? 0,
+      subjectMarks: extractSubjectMarks(student),
     }))
     .filter((student) => student.rollNo || student.studentName);
 }
@@ -1424,14 +1432,225 @@ function parseQuestionRange(question) {
   };
 }
 
+function parseQuestionThreshold(question) {
+  const normalized = String(question || '').toLowerCase();
+  const thresholdMatch = normalized.match(/\b(less than|below|under|greater than|more than|above|over|at least|minimum|maximum)\s+(\d+(?:\.\d+)?)\b/i);
+  if (!thresholdMatch) {
+    return null;
+  }
+
+  const operatorText = thresholdMatch[1].toLowerCase();
+  const value = Number(thresholdMatch[2]);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const usePercentage = normalized.includes('percent') || normalized.includes('percentage') || normalized.includes('%');
+  let operator = 'lt';
+  if (['greater than', 'more than', 'above', 'over'].includes(operatorText)) {
+    operator = 'gt';
+  } else if (operatorText === 'at least' || operatorText === 'minimum') {
+    operator = 'gte';
+  } else if (operatorText === 'maximum') {
+    operator = 'lte';
+  }
+
+  return { operator, value, usePercentage };
+}
+
+const DATA_QUERY_SCOPE_MESSAGE = 'Please ask questions regarding your uploaded student performance data.';
+const DATA_QUERY_KEYWORDS = [
+  'student', 'students', 'roll', 'name', 'names', 'mark', 'marks', 'score', 'scores',
+  'percentage', 'percent', 'pass', 'passed', 'fail', 'failed', 'weak', 'risk',
+  'top', 'best', 'highest', 'lowest', 'average', 'mean', 'rank', 'performer',
+  'performance', 'subject', 'subjects', 'class', 'analytics', 'analysis',
+  'distribution', 'range', 'between', 'above', 'below', 'count', 'total',
+  'grade', 'category', 'dashboard', 'upload', 'data', 'report', 'result',
+  'results', 'insight', 'recommendation', 'improvement', 'strength', 'weakness',
+];
+const OFF_TOPIC_QUERY_PATTERNS = [
+  /\b(hello|hi|hey|bye|good morning|good afternoon|good evening|good night)\b/i,
+  /\bweather\b/i,
+  /\bnews\b/i,
+  /\bjoke\b/i,
+  /\bpoem\b/i,
+  /\bstory\b/i,
+  /\brecipe\b/i,
+  /\bmovie\b/i,
+  /\bsong\b/i,
+  /\blyrics\b/i,
+  /\bcricket\b/i,
+  /\bfootball\b/i,
+  /\bstock\b/i,
+  /\bcrypto\b/i,
+  /\bcapital of\b/i,
+  /\bpresident\b/i,
+  /\bprime minister\b/i,
+  /\bwrite (a )?(code|program|script)\b/i,
+  /\bmake (a )?(code|program|script)\b/i,
+  /\bapi key\b/i,
+  /\bpassword\b/i,
+  /\bignore (previous|all) instructions\b/i,
+  /\bsystem prompt\b/i,
+];
+const CONCEPT_QUERY_PATTERN = /\b(what is|what are|explain|define|meaning of|definition of|teach me|tell me about)\b/i;
+
+function collectKnownQueryTerms(students = [], analytics = {}, subjectName = '') {
+  const terms = new Set();
+  const addTerm = (value) => {
+    const term = String(value || '').trim().toLowerCase();
+    if (term.length >= 2) {
+      terms.add(term);
+    }
+  };
+
+  addTerm(subjectName);
+  if (Array.isArray(analytics?.subjectSummary)) {
+    analytics.subjectSummary.forEach((subject) => addTerm(subject.subjectName));
+  }
+
+  buildQueryStudentList(students).forEach((student) => {
+    addTerm(student.rollNo);
+    addTerm(student.studentName);
+    Object.keys(student.subjectMarks || {}).forEach(addTerm);
+  });
+
+  return Array.from(terms);
+}
+
+function hasUploadedDataSignal(question, analytics, students, subjectName) {
+  const normalized = String(question || '').toLowerCase();
+  if (parseQuestionRange(question)) {
+    return true;
+  }
+
+  if (parseQuestionThreshold(question)) {
+    return true;
+  }
+
+  const hasKeyword = DATA_QUERY_KEYWORDS.some((keyword) => normalized.includes(keyword));
+  if (hasKeyword) {
+    return true;
+  }
+
+  return collectKnownQueryTerms(students, analytics, subjectName)
+    .some((term) => term && normalized.includes(term));
+}
+
+function isMostlyConceptQuestion(question, analytics, students, subjectName) {
+  const normalized = String(question || '').toLowerCase();
+  if (!CONCEPT_QUERY_PATTERN.test(normalized)) {
+    return false;
+  }
+
+  const metricSignals = DATA_QUERY_KEYWORDS.filter((keyword) => !['subject', 'subjects', 'class', 'data'].includes(keyword));
+  const hasMetricSignal = metricSignals.some((keyword) => normalized.includes(keyword)) || parseQuestionRange(question) || parseQuestionThreshold(question);
+  if (hasMetricSignal) {
+    return false;
+  }
+
+  return collectKnownQueryTerms(students, analytics, subjectName)
+    .some((term) => term && normalized.includes(term));
+}
+
+function hasOffTopicSignal(question) {
+  return OFF_TOPIC_QUERY_PATTERNS.some((pattern) => pattern.test(String(question || '')));
+}
+
+function buildCleanDataQuestion(question) {
+  const normalized = String(question || '').toLowerCase();
+  const range = parseQuestionRange(question);
+  const threshold = parseQuestionThreshold(question);
+  if (range) {
+    return `Which students are in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range?`;
+  }
+  if (threshold) {
+    const direction = ['gt', 'gte'].includes(threshold.operator) ? 'above' : 'below';
+    return `Which students scored ${direction} ${threshold.value} ${threshold.usePercentage ? 'percent' : 'marks'}?`;
+  }
+  if (normalized.includes('failed') || normalized.includes('failure') || normalized.includes('fail')) {
+    return 'Which students failed in the uploaded data?';
+  }
+  if (normalized.includes('weak') || normalized.includes('risk')) {
+    return 'Which students need improvement in the uploaded data?';
+  }
+  if (normalized.includes('top') || normalized.includes('best') || normalized.includes('highest')) {
+    return 'Who are the top performers in the uploaded data?';
+  }
+  if (normalized.includes('average') || normalized.includes('mean')) {
+    return 'What is the class average in the uploaded data?';
+  }
+  if (normalized.includes('subject')) {
+    return 'Which subject has the highest and lowest performance in the uploaded data?';
+  }
+  return 'Show the pass/fail summary for the uploaded data.';
+}
+
+function classifyQuestionScope(question, analytics, students, subjectName) {
+  const text = String(question || '').trim();
+  if (!text) {
+    return { allowed: false, message: 'Please type a question about your uploaded student performance data.' };
+  }
+
+  const hasDataSignal = hasUploadedDataSignal(text, analytics, students, subjectName);
+  if (!hasDataSignal || isMostlyConceptQuestion(text, analytics, students, subjectName)) {
+    return { allowed: false, message: DATA_QUERY_SCOPE_MESSAGE };
+  }
+
+  if (hasOffTopicSignal(text)) {
+    return {
+      allowed: false,
+      message: `${DATA_QUERY_SCOPE_MESSAGE} Try asking: "${buildCleanDataQuestion(text)}"`,
+    };
+  }
+
+  return { allowed: true, message: '' };
+}
+
 function answerQuestionFromData(question, analytics, students) {
   const normalized = String(question || '').toLowerCase();
   const range = parseQuestionRange(question);
+  const threshold = parseQuestionThreshold(question);
   const list = buildQueryStudentList(students);
   const topStudents = [...list].slice(0, 5);
   const failedStudents = list.filter((student) => String(student.status).toLowerCase() === 'fail').slice(0, 5);
   const weakStudents = list.filter((student) => student.percentage < 40 || String(student.status).toLowerCase() === 'fail').slice(0, 5);
   const subjectSummary = Array.isArray(analytics.subjectSummary) ? analytics.subjectSummary : [];
+  const selectedStudent = list.length === 1 ? list[0] : null;
+  const selectedSubjectMarks = selectedStudent
+    ? Object.entries(selectedStudent.subjectMarks || {})
+        .map(([subjectName, subjectValue]) => ({
+          subjectName,
+          marks: normalizeMarksValue(subjectValue),
+        }))
+        .filter((entry) => entry.subjectName && entry.marks !== null)
+    : [];
+
+  if (selectedStudent && selectedSubjectMarks.length > 0 && (
+    normalized.includes('subject')
+    || normalized.includes('weak')
+    || normalized.includes('strong')
+    || normalized.includes('highest')
+    || normalized.includes('lowest')
+    || normalized.includes('best')
+    || normalized.includes('marks')
+  )) {
+    const rankedSubjects = [...selectedSubjectMarks].sort((left, right) => right.marks - left.marks);
+    const strongestSubject = rankedSubjects[0];
+    const weakestSubject = rankedSubjects[rankedSubjects.length - 1];
+
+    if (normalized.includes('weak') || normalized.includes('lowest')) {
+      return `${selectedStudent.studentName}'s weakest subject is ${weakestSubject.subjectName} with ${weakestSubject.marks} marks.`;
+    }
+
+    if (normalized.includes('strong') || normalized.includes('highest') || normalized.includes('best')) {
+      return `${selectedStudent.studentName}'s strongest subject is ${strongestSubject.subjectName} with ${strongestSubject.marks} marks.`;
+    }
+
+    return `${selectedStudent.studentName}'s subject marks are: ${selectedSubjectMarks
+      .map((entry) => `${entry.subjectName}: ${entry.marks}`)
+      .join('; ')}. Strongest subject is ${strongestSubject.subjectName} (${strongestSubject.marks}) and weakest subject is ${weakestSubject.subjectName} (${weakestSubject.marks}).`;
+  }
 
   if (range) {
     const matchingStudents = list.filter((student) => {
@@ -1444,6 +1663,32 @@ function answerQuestionFromData(question, analytics, students) {
     }
 
     return `Students in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range: ${matchingStudents
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, Marks ${student.marks}, ${student.percentage}%)`)
+      .join('; ')}.`;
+  }
+
+  if (threshold) {
+    const matchingStudents = list.filter((student) => {
+      const value = threshold.usePercentage ? student.percentage : student.marks;
+      if (!Number.isFinite(value)) return false;
+      if (threshold.operator === 'gt') return value > threshold.value;
+      if (threshold.operator === 'gte') return value >= threshold.value;
+      if (threshold.operator === 'lte') return value <= threshold.value;
+      return value < threshold.value;
+    });
+    const direction = ['gt', 'gte'].includes(threshold.operator) ? 'above' : 'below';
+    const metric = threshold.usePercentage ? 'percentage' : 'marks';
+    const isCountQuestion = /\b(how many|count|number of|total)\b/i.test(normalized);
+
+    if (!matchingStudents.length) {
+      return `No students scored ${direction} ${threshold.value} ${metric}.`;
+    }
+
+    if (isCountQuestion) {
+      return `${matchingStudents.length} student${matchingStudents.length === 1 ? '' : 's'} scored ${direction} ${threshold.value} ${metric}.`;
+    }
+
+    return `Students who scored ${direction} ${threshold.value} ${metric}: ${matchingStudents
       .map((student) => `${student.studentName} (Roll No ${student.rollNo}, Marks ${student.marks}, ${student.percentage}%)`)
       .join('; ')}.`;
   }
@@ -1499,6 +1744,11 @@ function answerQuestionFromData(question, analytics, students) {
 }
 
 async function generateQuestionAnswer(question, analytics, students, subjectName) {
+  const scope = classifyQuestionScope(question, analytics, students, subjectName);
+  if (!scope.allowed) {
+    return scope.message;
+  }
+
   const deterministicAnswer = answerQuestionFromData(question, analytics, students);
   if (deterministicAnswer) {
     return deterministicAnswer;
@@ -1518,8 +1768,11 @@ async function generateQuestionAnswer(question, analytics, students, subjectName
           'You answer questions about student performance data.',
           'Use only the facts provided in the context.',
           'Never invent names, marks, percentages, or counts.',
+          `If the question is unrelated to the uploaded data, answer exactly: "${DATA_QUERY_SCOPE_MESSAGE}"`,
+          'If the question mixes uploaded-data analysis with unrelated tasks, ask the user to submit only the uploaded-data question.',
           'If the answer is not available from the context, say that clearly.',
-          'When listing students, include their names, roll numbers, marks, and percentages when relevant.',
+          'When listing students, include their names, roll numbers, marks, percentages, and subject marks when relevant.',
+          'Respect any selected subject or selected student already reflected in the context.',
           'Be concise and answer the exact question the user asked.',
           'Return only JSON with a single key called "answer".',
         ].join(' '),
@@ -1540,11 +1793,21 @@ async function generateQuestionAnswer(question, analytics, students, subjectName
 
   const aiContent = completion.choices?.[0]?.message?.content || '';
   const payload = extractJsonObject(aiContent);
-  if (payload && typeof payload.answer === 'string' && payload.answer.trim()) {
-    return payload.answer.trim();
+  if (payload && payload.answer !== undefined && payload.answer !== null) {
+    if (typeof payload.answer === 'string' && payload.answer.trim()) {
+      return payload.answer.trim();
+    }
+    if (typeof payload.answer === 'number') {
+      return `Answer: ${payload.answer}`;
+    }
   }
 
-  return aiContent.trim() || `I could not generate a reliable answer from the ${subjectName} data.`;
+  const trimmedContent = aiContent.trim();
+  if (trimmedContent.startsWith('{') || trimmedContent.startsWith('[')) {
+    return `I could not generate a reliable answer from the ${subjectName} data. Please ask a clear question about marks, students, subjects, ranges, or pass/fail results.`;
+  }
+
+  return trimmedContent || `I could not generate a reliable answer from the ${subjectName} data.`;
 }
 
 /**
@@ -1984,6 +2247,20 @@ app.post('/api/upload', authMiddleware, upload.array('file'), async (req, res) =
     res.status(201).json({
       success: true,
       uploadId,
+      upload: {
+        _id: uploadId,
+        subjectName: subjectName.trim(),
+        className: className.trim(),
+        maxMarks: maxMarksNum,
+        passingMarks: passingMarksNum,
+        subjectType: reportType,
+        fileName: fileNames[0],
+        fileNames,
+        fileCount: fileNames.length,
+        studentCount: students.length,
+        uploadDate: now,
+        status: 'completed',
+      },
       analytics: analyticsData,
       studentCount: students.length,
       fileCount: fileNames.length,
@@ -2235,6 +2512,8 @@ app.post('/api/ai-query/:uploadId', authMiddleware, async (req, res) => {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
     const question = String(req.body?.question || '').trim();
+    const selectedSubject = String(req.body?.filters?.subject || 'all').trim();
+    const selectedStudent = String(req.body?.filters?.student || 'all').trim();
 
     if (!question) {
       return res.status(400).json({ success: false, message: 'Question is required.' });
@@ -2255,7 +2534,11 @@ app.post('/api/ai-query/:uploadId', authMiddleware, async (req, res) => {
       .sort({ rank: 1, percentage: -1, marks: -1, studentName: 1 })
       .toArray();
 
-    const answer = await generateQuestionAnswer(question, analytics, students, uploadDoc.subjectName || 'Current Subject');
+    const filteredData = buildFilteredDashboardData(uploadDoc, students, analytics, selectedSubject, selectedStudent);
+    const subjectName = filteredData.filters?.selectedSubject && filteredData.filters.selectedSubject !== 'all'
+      ? filteredData.filters.selectedSubject
+      : (uploadDoc.subjectName || 'Current Subject');
+    const answer = await generateQuestionAnswer(question, filteredData.analytics, filteredData.students, subjectName);
 
     res.json({
       success: true,

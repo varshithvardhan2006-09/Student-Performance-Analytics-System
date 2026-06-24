@@ -580,6 +580,14 @@ function buildStudentPerformanceView(student, marks, rank = student.rank || 0) {
   };
 }
 
+function getPerformanceStatus(percentage) {
+  const value = Number(percentage) || 0;
+  if (value >= 90) return 'Excellent';
+  if (value >= 75) return 'Good';
+  if (value >= 50) return 'Average';
+  return 'Needs Improvement';
+}
+
 function calculateAnalyticsFromStudents(students, reportType = 'single') {
   const totalStudents = students.length;
   const marksDistribution = {
@@ -700,7 +708,7 @@ function getSubjectNamesFrom(students = getSourceStudents(), analytics = getSour
   }
 
   students.forEach((student) => {
-    if (student && typeof student.subjectMarks === 'object' && !Array.isArray(student.subjectMarks)) {
+    if (student?.subjectMarks && typeof student.subjectMarks === 'object' && !Array.isArray(student.subjectMarks)) {
       Object.keys(student.subjectMarks).forEach(addName);
     }
   });
@@ -777,6 +785,8 @@ function getWeakStudents(limit = 5) {
 
 function getFilteredStudents() {
   const search = state.filters.search.trim().toLowerCase();
+  const selectedStatus = String(state.filters.status || 'all').toLowerCase();
+  const selectedCategory = String(state.filters.category || 'all').toLowerCase();
   return [...getDashboardStudents()].filter((student) => {
     const rollNo = String(student.rollNo || '').toLowerCase();
     const studentName = String(student.studentName || '').toLowerCase();
@@ -787,10 +797,10 @@ function getFilteredStudents() {
     if (search && !rollNo.includes(search) && !studentName.includes(search)) {
       return false;
     }
-    if (state.filters.status !== 'all' && status !== state.filters.status) {
+    if (selectedStatus !== 'all' && status !== selectedStatus) {
       return false;
     }
-    if (state.filters.category !== 'all' && category !== state.filters.category) {
+    if (selectedCategory !== 'all' && category !== selectedCategory) {
       return false;
     }
     if (state.filters.range !== 'all') {
@@ -822,6 +832,126 @@ function getCategoryCounts() {
   }
 
   return counts;
+}
+
+function getSelectedDashboardStudent() {
+  const selectedStudent = normalizeFilterValue(state.dashboardFilters.student);
+  if (selectedStudent === 'all') {
+    return null;
+  }
+
+  const normalized = selectedStudent.toLowerCase();
+  return getSourceStudents().find((student) => (
+    String(student.rollNo || '').toLowerCase() === normalized
+    || String(student.studentName || '').toLowerCase() === normalized
+  )) || getDashboardStudents()[0] || null;
+}
+
+function getSelectedSubjectName() {
+  const selectedSubject = normalizeFilterValue(state.dashboardFilters.subject);
+  if (selectedSubject === 'all') {
+    return '';
+  }
+
+  return getSubjectNames().find((subjectName) => subjectName === selectedSubject) || selectedSubject;
+}
+
+function getStudentSubjectRows(student = getSelectedDashboardStudent()) {
+  if (!student) {
+    return [];
+  }
+
+  const upload = getCurrentUpload() || {};
+  const maxMarks = Number(upload.maxMarks) || 100;
+  const subjectNames = getSubjectNames();
+  const subjectSummary = getSubjectSummaryFrom(getSourceStudents(), getSourceAnalytics());
+  const selectedSubject = getSelectedSubjectName();
+  const names = selectedSubject
+    ? [selectedSubject]
+    : (subjectNames.length ? subjectNames : [upload.subjectName || 'Current Subject']);
+
+  return names.map((subjectName) => {
+    const rawMark = subjectNames.length
+      ? student.subjectMarks?.[subjectName]
+      : student.marks;
+    const mark = Number(rawMark);
+    const summary = subjectSummary.find((item) => item.subjectName === subjectName);
+    const classAverage = Number(summary?.averageMarks ?? getSourceAnalytics()?.averageMarks ?? 0);
+    const percentage = Number.isFinite(mark) ? Number(((mark / maxMarks) * 100).toFixed(2)) : 0;
+    const rankedStudents = getSourceStudents()
+      .map((item) => {
+        const value = subjectNames.length ? item.subjectMarks?.[subjectName] : item.marks;
+        const numericValue = Number(value);
+        return Number.isFinite(numericValue)
+          ? { rollNo: item.rollNo, studentName: item.studentName, marks: numericValue }
+          : null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.marks - left.marks || String(left.studentName).localeCompare(String(right.studentName)));
+    const rank = rankedStudents.findIndex((item) => (
+      String(item.rollNo || '') === String(student.rollNo || '')
+      || String(item.studentName || '').toLowerCase() === String(student.studentName || '').toLowerCase()
+    )) + 1;
+
+    return {
+      subjectName,
+      marks: Number.isFinite(mark) ? mark : 0,
+      percentage,
+      classAverage,
+      rank: rank || 0,
+      status: percentage >= 90 ? 'Excellent' : percentage >= 75 ? 'Good' : percentage >= 50 ? 'Average' : 'Needs Improvement',
+    };
+  }).filter((row) => row.subjectName);
+}
+
+function getStudentOverallPercentage(rows = getStudentSubjectRows()) {
+  if (!rows.length) {
+    return 0;
+  }
+
+  return Number((rows.reduce((sum, row) => sum + (Number(row.percentage) || 0), 0) / rows.length).toFixed(2));
+}
+
+function buildStudentInsights(student, rows, selectedSubject = '') {
+  if (!student || !rows.length) {
+    return {
+      title: 'No personalized data available',
+      points: ['Select a student with valid marks to generate personalized insights.'],
+    };
+  }
+
+  const sorted = [...rows].sort((left, right) => right.percentage - left.percentage);
+  const best = sorted[0];
+  const weakest = sorted.at(-1);
+  const overall = getStudentOverallPercentage(rows);
+  const totalMarks = rows.reduce((sum, row) => sum + (Number(row.marks) || 0), 0);
+
+  if (selectedSubject && rows[0]) {
+    const row = rows[0];
+    const gap = Number((row.marks - row.classAverage).toFixed(2));
+    return {
+      title: `${student.studentName} in ${row.subjectName}`,
+      summary: `${student.studentName} scored ${row.marks} in ${row.subjectName}, which is ${formatPercent(row.percentage)} and categorized as ${row.status}.`,
+      points: [
+        `${row.marks} marks (${formatPercent(row.percentage)}) places the student in the ${row.status} category.`,
+        row.rank ? `Subject rank is ${row.rank} among students for ${row.subjectName}.` : 'Rank is unavailable for this subject.',
+        gap >= 0 ? `The score is ${gap} marks above the class average.` : `The score is ${Math.abs(gap)} marks below the class average.`,
+        row.percentage >= 75 ? 'Recommendation: maintain consistency with advanced practice questions.' : 'Recommendation: schedule focused revision and topic-wise practice for this subject.',
+      ],
+    };
+  }
+
+  return {
+    title: `${student.studentName} across all subjects`,
+    summary: `${student.studentName}'s personalized dashboard is based only on their marks across ${rows.length} subject${rows.length === 1 ? '' : 's'}.`,
+    points: [
+      `Overall percentage is ${formatPercent(overall)} across ${rows.length} subject${rows.length === 1 ? '' : 's'}.`,
+      `Total marks obtained: ${totalMarks}. The donut chart shows how these marks are distributed across subjects.`,
+      `Strongest subject: ${best.subjectName} (${formatPercent(best.percentage)}).`,
+      `Weakest subject: ${weakest.subjectName} (${formatPercent(weakest.percentage)}).`,
+      overall >= 75 ? 'Recommendation: continue enrichment tasks and maintain steady preparation.' : 'Recommendation: prioritize weak subjects and review mistakes after each assessment.',
+    ],
+  };
 }
 
 function getTrendData() {
@@ -888,6 +1018,12 @@ function chartOptions(extra = {}) {
 function renderCharts() {
   destroyCharts();
   if (!window.Chart) {
+    return;
+  }
+
+  const activeFilterInfo = getActiveDashboardFilterInfo();
+  if (activeFilterInfo.hasStudent) {
+    renderStudentCharts(activeFilterInfo);
     return;
   }
 
@@ -1045,6 +1181,189 @@ function renderCharts() {
           y: {
             ticks: { color: '#475569' },
             grid: { color: 'rgba(148, 163, 184, 0.18)' },
+          },
+        },
+      }),
+    }));
+  }
+}
+
+function renderStudentCharts(activeFilterInfo = getActiveDashboardFilterInfo()) {
+  const student = getSelectedDashboardStudent();
+  const selectedSubject = activeFilterInfo.hasSubject ? getSelectedSubjectName() : '';
+  const rows = getStudentSubjectRows(student);
+  if (!student || !rows.length) {
+    return;
+  }
+
+  const labels = rows.map((row) => row.subjectName);
+  const marks = rows.map((row) => Number(row.marks) || 0);
+  const percentages = rows.map((row) => Number(row.percentage) || 0);
+  const classAverages = rows.map((row) => Number(row.classAverage) || 0);
+  const chartPalette = ['#2563eb', '#16a34a', '#7c3aed', '#ef4444', '#0ea5e9', '#f59e0b', '#14b8a6', '#ec4899'];
+
+  const subjectMarksCanvas = document.getElementById('studentSubjectMarksChart');
+  const distributionCanvas = document.getElementById('studentDistributionChart');
+  const trendCanvas = document.getElementById('studentTrendChart');
+  const radarCanvas = document.getElementById('studentRadarChart');
+  const comparisonCanvas = document.getElementById('studentClassAverageChart');
+  const gaugeCanvas = document.getElementById('studentStatusGaugeChart');
+
+  if (subjectMarksCanvas) {
+    state.charts.push(new Chart(subjectMarksCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Marks',
+          data: marks,
+          backgroundColor: '#2563eb',
+          borderRadius: 12,
+        }],
+      },
+      options: chartOptions({
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#475569' }, grid: { display: false } },
+          y: { beginAtZero: true, max: Number(getCurrentUpload()?.maxMarks) || 100, ticks: { color: '#475569' }, grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+        },
+      }),
+    }));
+  }
+
+  if (distributionCanvas) {
+    state.charts.push(new Chart(distributionCanvas, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{
+          data: marks,
+          backgroundColor: labels.map((_, index) => chartPalette[index % chartPalette.length]),
+          borderColor: '#ffffff',
+          borderWidth: 3,
+        }],
+      },
+      options: chartOptions({
+        cutout: '62%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              color: '#334155',
+              boxWidth: 12,
+              usePointStyle: true,
+              pointStyle: 'circle',
+            },
+          },
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = Number(context.raw) || 0;
+                const total = marks.reduce((sum, mark) => sum + mark, 0);
+                const share = total ? (value / total) * 100 : 0;
+                return `${context.label}: ${value} marks (${formatPercent(share)})`;
+              },
+            },
+          },
+        },
+      }),
+    }));
+  }
+
+  if (trendCanvas) {
+    state.charts.push(new Chart(trendCanvas, {
+      type: 'line',
+      data: {
+        labels: selectedSubject ? ['Current Upload'] : labels,
+        datasets: [{
+          label: selectedSubject ? `${selectedSubject} Marks` : 'Subject Performance',
+          data: selectedSubject ? [marks[0]] : marks,
+          tension: 0.35,
+          borderColor: '#2563eb',
+          backgroundColor: 'rgba(37, 99, 235, 0.12)',
+          fill: true,
+          pointRadius: 5,
+          pointBackgroundColor: '#2563eb',
+        }],
+      },
+      options: chartOptions({
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#475569' }, grid: { display: false } },
+          y: { beginAtZero: true, max: Number(getCurrentUpload()?.maxMarks) || 100, ticks: { color: '#475569' }, grid: { color: 'rgba(148, 163, 184, 0.18)' } },
+        },
+      }),
+    }));
+  }
+
+  if (radarCanvas) {
+    state.charts.push(new Chart(radarCanvas, {
+      type: 'radar',
+      data: {
+        labels,
+        datasets: [{
+          label: `${student.studentName}`,
+          data: percentages,
+          borderColor: '#2563eb',
+          backgroundColor: 'rgba(37, 99, 235, 0.16)',
+          pointBackgroundColor: '#2563eb',
+        }],
+      },
+      options: chartOptions({
+        scales: {
+          r: {
+            beginAtZero: true,
+            max: 100,
+            ticks: { display: false },
+            pointLabels: { color: '#475569' },
+            grid: { color: 'rgba(148, 163, 184, 0.25)' },
+          },
+        },
+      }),
+    }));
+  }
+
+  if (comparisonCanvas) {
+    state.charts.push(new Chart(comparisonCanvas, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: student.studentName, data: marks, backgroundColor: '#2563eb', borderRadius: 10 },
+          { label: 'Class Average', data: classAverages, backgroundColor: '#f59e0b', borderRadius: 10 },
+        ],
+      },
+      options: chartOptions({
+        scales: {
+          x: { ticks: { color: '#475569' }, grid: { display: false } },
+          y: { beginAtZero: true, max: Number(getCurrentUpload()?.maxMarks) || 100, ticks: { color: '#475569' }, grid: { color: 'rgba(148, 163, 184, 0.2)' } },
+        },
+      }),
+    }));
+  }
+
+  if (gaugeCanvas) {
+    const value = percentages[0] || 0;
+    state.charts.push(new Chart(gaugeCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['Score', 'Remaining'],
+        datasets: [{
+          data: [value, Math.max(0, 100 - value)],
+          backgroundColor: [value >= 90 ? '#22c55e' : value >= 75 ? '#2563eb' : value >= 50 ? '#f59e0b' : '#ef4444', '#e5edff'],
+          borderWidth: 0,
+        }],
+      },
+      options: chartOptions({
+        cutout: '70%',
+        circumference: 180,
+        rotation: 270,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (context) => context.label === 'Score' ? `${formatPercent(value)} ${rows[0].status}` : '',
+            },
           },
         },
       }),
@@ -1435,6 +1754,227 @@ function renderEmptyState(title, message, buttonLabel, targetView) {
   `;
 }
 
+function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterInfo()) {
+  const upload = getCurrentUpload();
+  const student = getSelectedDashboardStudent();
+  const rows = getStudentSubjectRows(student);
+
+  if (!upload || !student || !rows.length) {
+    return renderEmptyState(
+      'No matching student data',
+      'The selected student does not have marks for the current dashboard filter.',
+      'Reset Filters',
+      'dashboard'
+    );
+  }
+
+  const selectedSubject = activeFilterInfo.hasSubject ? getSelectedSubjectName() : '';
+  const selectedRow = selectedSubject
+    ? rows.find((row) => row.subjectName.toLowerCase() === selectedSubject.toLowerCase()) || rows[0]
+    : null;
+  const maxMarks = Number(upload.maxMarks) || 100;
+  const overallPercentage = getStudentOverallPercentage(rows);
+  const totalMarks = rows.reduce((sum, row) => sum + (Number(row.marks) || 0), 0);
+  const totalPossibleMarks = rows.length * maxMarks;
+  const insights = buildStudentInsights(student, rows, selectedSubject);
+  const subjectLabel = selectedSubject || 'All Subjects';
+  const rankLabel = selectedRow?.rank ? `Rank ${selectedRow.rank}` : 'Rank not available';
+  const subjectPercentage = selectedRow ? (Number(selectedRow.marks) / maxMarks) * 100 : overallPercentage;
+  const statusLabel = getPerformanceStatus(subjectPercentage);
+  const overallStatusLabel = getPerformanceStatus(overallPercentage);
+  const exactSubjectStudents = selectedSubject
+    ? getSourceStudents().filter((item) => Number.isFinite(Number(item.subjectMarks?.[selectedSubject] ?? item.marks))).length
+    : getSourceStudents().length;
+  const exactRank = selectedRow?.rank || 0;
+  const exactRankPercentile = exactRank && exactSubjectStudents
+    ? Number(((exactRank / exactSubjectStudents) * 100).toFixed(2))
+    : 0;
+  const exactGap = selectedRow ? Number((Number(selectedRow.marks || 0) - Number(selectedRow.classAverage || 0)).toFixed(2)) : 0;
+  const achievementWidth = Math.max(0, Math.min(100, subjectPercentage));
+  const recommendations = selectedRow
+    ? [
+        exactGap >= 0 ? 'You are performing above the class average.' : 'You are below the class average; focus revision is recommended.',
+        subjectPercentage >= 75 ? `Strong understanding in ${subjectLabel}.` : `Revise core concepts in ${subjectLabel}.`,
+        subjectPercentage >= 90 ? 'Aim for consistency with advanced questions.' : subjectPercentage >= 75 ? 'Practice advanced and mixed-difficulty questions.' : 'Create a weekly practice plan and retest weak topics.',
+      ]
+    : [];
+
+  const allSubjectVisuals = `
+    <div class="summary-grid student-focus-grid">
+      <article class="summary-card avg">
+        <span class="summary-label">Overall Percentage</span>
+        <strong class="summary-value">${escapeHtml(formatPercent(overallPercentage))}</strong>
+        <span class="summary-note">Total marks: ${escapeHtml(totalMarks)} / ${escapeHtml(totalPossibleMarks)} | ${escapeHtml(overallStatusLabel)}</span>
+        <span class="summary-accent"></span>
+      </article>
+    </div>
+
+    <div class="section-grid student-visual-grid">
+      <section class="chart-card large">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Subject Wise</p>
+            <h3>Subject-wise Marks</h3>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="studentSubjectMarksChart"></canvas>
+        </div>
+      </section>
+
+      <section class="chart-card large">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Distribution</p>
+            <h3>Subject Performance Distribution</h3>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="studentDistributionChart"></canvas>
+        </div>
+      </section>
+
+      <section class="chart-card large">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Strength Map</p>
+            <h3>Strengths vs Weak Subjects</h3>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="studentRadarChart"></canvas>
+        </div>
+      </section>
+
+      <section class="chart-card large">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Comparison</p>
+            <h3>Student vs Class Average</h3>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="studentClassAverageChart"></canvas>
+        </div>
+      </section>
+    </div>
+  `;
+
+  const exactSubjectVisuals = `
+    <div class="summary-grid student-exact-kpi-grid">
+      <article class="summary-card ${statusLabel === 'Excellent' ? 'high' : statusLabel === 'Good' ? 'pass' : statusLabel === 'Average' ? 'avg' : 'weak'}">
+        <span class="summary-label">Subject Marks</span>
+        <strong class="summary-value">${escapeHtml(selectedRow?.marks ?? 0)} / ${escapeHtml(maxMarks)}</strong>
+        <span class="summary-note">${escapeHtml(formatPercent(subjectPercentage))} | ${escapeHtml(statusLabel)}</span>
+        <span class="summary-accent"></span>
+      </article>
+
+      <article class="summary-card low">
+        <span class="summary-label">Subject Rank</span>
+        <strong class="summary-value">${escapeHtml(rankLabel)}${exactSubjectStudents ? ` / ${escapeHtml(exactSubjectStudents)}` : ''}</strong>
+        <span class="summary-note">${exactRankPercentile ? `Top ${escapeHtml(formatPercent(exactRankPercentile))}` : 'Position among all students'}</span>
+        <span class="summary-accent"></span>
+      </article>
+    </div>
+
+    <div class="section-grid student-visual-grid exact-subject-grid">
+      <section class="chart-card large">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Comparison</p>
+            <h3>Student Score vs Class Average</h3>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="studentClassAverageChart"></canvas>
+        </div>
+      </section>
+
+      <section class="chart-card large subject-breakdown-card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Breakdown</p>
+            <h3>Subject Performance Breakdown</h3>
+          </div>
+        </div>
+        <div class="breakdown-layout">
+          <div class="breakdown-progress">
+            <span class="breakdown-ring" style="--score:${escapeHtml(achievementWidth)};">
+              <strong>${escapeHtml(formatPercent(subjectPercentage))}</strong>
+              <small>Achieved</small>
+            </span>
+            <div class="mini-progress">
+              <span style="width:${escapeHtml(achievementWidth)}%;"></span>
+            </div>
+          </div>
+          <div class="breakdown-metrics">
+            <span class="status-pill ${statusLabel.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(statusLabel)}</span>
+            <p><strong>Marks Obtained</strong><b>${escapeHtml(selectedRow?.marks ?? 0)} / ${escapeHtml(maxMarks)}</b></p>
+            <p><strong>Class Average</strong><b>${escapeHtml(selectedRow?.classAverage ?? 0)} / ${escapeHtml(maxMarks)}</b></p>
+            <p><strong>Marks ${exactGap >= 0 ? 'Above' : 'Below'} Avg.</strong><b>${exactGap >= 0 ? '+' : ''}${escapeHtml(exactGap)}</b></p>
+            <p><strong>Rank Percentile</strong><b>${exactRankPercentile ? escapeHtml(formatPercent(exactRankPercentile)) : '-'}</b></p>
+          </div>
+        </div>
+        <div class="breakdown-recommendations">
+          <strong>Insights & Recommendations</strong>
+          ${recommendations.map((item, index) => `
+            <p><span>${index < 2 ? '✓' : '!'}</span>${escapeHtml(item)}</p>
+          `).join('')}
+        </div>
+      </section>
+
+      <section class="chart-card full">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Status</p>
+            <h3>Performance Status</h3>
+          </div>
+          <span class="badge">${escapeHtml(statusLabel)}</span>
+        </div>
+        <div class="chart-wrap gauge-wrap">
+          <canvas id="studentStatusGaugeChart"></canvas>
+        </div>
+      </section>
+    </div>
+  `;
+
+  return `
+    <section class="page">
+      <div class="hero-card page-card">
+        <div>
+          <p class="eyebrow">Personalized Analytics</p>
+          <h1 class="page-title">${escapeHtml(student.studentName)} • ${escapeHtml(subjectLabel)}</h1>
+          <p class="page-copy">Roll No ${escapeHtml(student.rollNo)} | Class: ${escapeHtml(upload.className)} | Uploaded on: ${escapeHtml(formatDate(upload.uploadDate))}</p>
+          <div class="hero-info">
+            <span class="badge">Mode: ${escapeHtml(selectedSubject ? 'Student + Subject' : 'Student + All Subjects')}</span>
+            <span class="badge">Subjects: ${escapeHtml(rows.length)}</span>
+            <span class="badge">Overall: ${escapeHtml(formatPercent(overallPercentage))}</span>
+          </div>
+        </div>
+        <div class="hero-actions">
+          <button class="ghost-btn" type="button" data-view="upload">Upload Another File</button>
+          <button class="ghost-btn" type="button" data-generate-insights>Open AI Insights</button>
+          <button class="primary-btn" type="button" data-download-report="pdf">Download PDF Report</button>
+        </div>
+      </div>
+
+      ${renderDashboardFilters()}
+      ${renderActiveFilterSummary()}
+
+      ${selectedSubject ? exactSubjectVisuals : allSubjectVisuals}
+
+      <section class="insight-card student-insight-card">
+        <p class="eyebrow">Personalized Insights</p>
+        <h3>${escapeHtml(selectedSubject ? `${student.studentName} in ${subjectLabel}` : `${student.studentName} across all subjects`)}</h3>
+        <p>${escapeHtml(insights.summary)}</p>
+        <div class="insight-list">
+          ${insights.points.map((point) => `<span>${escapeHtml(point)}</span>`).join('')}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function renderDashboardPage() {
   const upload = getCurrentUpload();
   const analytics = getDashboardAnalytics();
@@ -1455,6 +1995,10 @@ function renderDashboardPage() {
   const improvementRate = getImprovementRate();
   const categoryCounts = getCategoryCounts();
   const activeFilterInfo = getActiveDashboardFilterInfo();
+  if (activeFilterInfo.hasStudent) {
+    return renderStudentDashboardPage(activeFilterInfo);
+  }
+
   const isExactStudentSubject = activeFilterInfo.hasSubject && activeFilterInfo.hasStudent;
   const topPerformers = getTopPerformers(5);
   const weakStudents = getWeakStudents(5);
@@ -1671,11 +2215,19 @@ function renderDashboardPage() {
   `;
 }
 
+function cleanInsightText(text) {
+  return String(text || '')
+    .replace(/\*\*/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function renderInsightSection(title, text, extraClass = '') {
+  const cleanedText = cleanInsightText(text);
   return `
     <article class="insight-card ${extraClass}">
       <p class="eyebrow">${escapeHtml(title)}</p>
-      <div class="ai-answer">${escapeHtml(text || 'No data yet.').replace(/\n/g, '<br>')}</div>
+      <div class="ai-answer">${escapeHtml(cleanedText || 'No data yet.').replace(/\n/g, '<br>')}</div>
     </article>
   `;
 }
@@ -1686,9 +2238,7 @@ function buildFallbackInsights() {
     return {
       overallSummary: 'Upload a subject file to generate AI insights.',
       weakStudentAnalysis: 'Weak student analysis will appear after data is uploaded.',
-      recommendations: 'Recommendations will appear after the file is processed.',
-      improvementStrategy: 'Improvement strategy will appear after the file is processed.',
-      actionPlan: 'Action plan will appear after the file is processed.',
+      topPerformerAnalysis: 'Top performer analysis will appear after data is uploaded.',
     };
   }
 
@@ -1706,25 +2256,14 @@ function buildFallbackInsights() {
   }
 
   const weakStudentAnalysis = `${weakStudents} students are in the weak-student range. The gap between the highest mark (${highest}) and lowest mark (${lowest}) should be monitored carefully.`;
-  const recommendations = [
-    'Schedule focused remedial sessions for students below the passing threshold.',
-    'Review topics where average performance is low and add practice exercises.',
-    'Use peer tutoring by pairing top performers with weaker students.',
-    'Run short quizzes to identify concept gaps early.',
-  ].join('\n');
-  const improvementStrategy = `Use the current average (${formatPercent(averageMarks)}) as the baseline and work toward steady gains in the next assessment cycle.`;
-  const actionPlan = [
-    'Shortlist weak students and assign weekly follow-up tasks.',
-    'Meet individually with at-risk students to understand learning blockers.',
-    'Track improvement after each new upload to monitor progress.',
-  ].join('\n');
+  const topPerformerAnalysis = getTopPerformers(3)
+    .map((student, index) => `${index + 1}. ${student.studentName} scored ${formatPercent(Number(student.percentage ?? student.marks) || 0)}.`)
+    .join('\n') || 'Top performers will appear when student records are available.';
 
   return {
     overallSummary,
     weakStudentAnalysis,
-    recommendations,
-    improvementStrategy,
-    actionPlan,
+    topPerformerAnalysis,
   };
 }
 
@@ -1872,21 +2411,15 @@ function renderInsightsPage() {
         <div class="card-head">
           <div>
             <p class="eyebrow">AI Insights</p>
-            <h3>Structured summary</h3>
-            <p>The cards below combine the generated AI insights and a safe fallback summary.</p>
-          </div>
-          <div class="badge-row">
-            <span class="badge">Trend lines from history</span>
-            <span class="badge">Local fallback ready</span>
+            <h3>Focused summary</h3>
+            <p>The cards below show only useful insights from the uploaded student data.</p>
           </div>
         </div>
 
         <div class="insight-grid">
           ${renderInsightSection('Overall Summary', insights.overallSummary || fallback.overallSummary || '')}
           ${renderInsightSection('Weak Student Analysis', insights.weakStudentAnalysis || fallback.weakStudentAnalysis || '')}
-          ${renderInsightSection('Teacher Recommendations', insights.recommendations || fallback.recommendations || '')}
-          ${renderInsightSection('Improvement Strategy', insights.improvementStrategy || fallback.improvementStrategy || '')}
-          ${renderInsightSection('Academic Action Plan', insights.actionPlan || fallback.actionPlan || '', 'full')}
+          ${renderInsightSection('Top Performer Analysis', insights.topPerformerAnalysis || fallback.topPerformerAnalysis || '')}
         </div>
 
         <div class="page-card" style="margin-top:1rem;background:linear-gradient(180deg,#f8fbff,#fff);">
@@ -2140,6 +2673,46 @@ async function loadFilteredDashboardData() {
   }
 }
 
+function getUploadIdFromResponse(response) {
+  return String(response?.uploadId || response?.upload?._id || response?.upload?.id || '').trim();
+}
+
+async function waitForDashboardData(uploadId, attempts = 5) {
+  const resolvedUploadId = String(uploadId || '').trim();
+  if (!resolvedUploadId) {
+    throw new Error('Upload finished, but the backend did not return an upload ID.');
+  }
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      state.processing.message = attempt === 1
+        ? 'Upload completed. Loading verified analytics from the database...'
+        : 'Still preparing dashboard data. Checking the database again...';
+      state.processing.progress = Math.max(state.processing.progress || 0, attempt === 1 ? 96 : 98);
+      renderPage();
+
+      await loadHistory();
+      await loadUploadData(resolvedUploadId);
+      await loadFilteredDashboardData();
+
+      const hasAnalytics = Boolean(state.currentUpload && getDashboardAnalytics());
+      const hasStudents = Array.isArray(getDashboardStudents()) && getDashboardStudents().length > 0;
+      if (hasAnalytics && hasStudents) {
+        return resolvedUploadId;
+      }
+
+      lastError = new Error('Dashboard data is not ready yet.');
+    } catch (error) {
+      lastError = error;
+    }
+
+    await delay(500 * attempt);
+  }
+
+  throw lastError || new Error('Upload completed, but dashboard data could not be loaded.');
+}
+
 async function applyDashboardFilters() {
   await loadFilteredDashboardData();
   renderPage();
@@ -2355,7 +2928,7 @@ async function submitUploadForm(form) {
       headers: {},
     });
 
-    state.processing.message = 'File verified successfully. Preparing analytics dashboard...';
+    state.processing.message = 'File uploaded. Verifying saved analytics...';
     renderPage();
 
     const visibleWait = Math.max(900, 1600 - (Date.now() - startedAt));
@@ -2363,8 +2936,8 @@ async function submitUploadForm(form) {
       await delay(visibleWait);
     }
 
-    await loadHistory();
-    await loadUploadData(response.uploadId);
+    const uploadId = getUploadIdFromResponse(response);
+    await waitForDashboardData(uploadId);
     completeProcessing('File verified successfully. Redirecting to dashboard...');
 
     await delay(650);
@@ -2630,14 +3203,186 @@ function parseQuestionRange(question) {
   return { lower, upper, usePercentage };
 }
 
+function parseQuestionThreshold(question) {
+  const normalized = String(question || '').toLowerCase();
+  const thresholdMatch = normalized.match(/\b(less than|below|under|greater than|more than|above|over|at least|minimum|maximum)\s+(\d+(?:\.\d+)?)\b/i);
+  if (!thresholdMatch) {
+    return null;
+  }
+
+  const operatorText = thresholdMatch[1].toLowerCase();
+  const value = Number(thresholdMatch[2]);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  const usePercentage = normalized.includes('percent') || normalized.includes('percentage') || normalized.includes('%');
+  let operator = 'lt';
+  if (['greater than', 'more than', 'above', 'over'].includes(operatorText)) {
+    operator = 'gt';
+  } else if (operatorText === 'at least' || operatorText === 'minimum') {
+    operator = 'gte';
+  } else if (operatorText === 'maximum') {
+    operator = 'lte';
+  }
+
+  return { operator, value, usePercentage };
+}
+
+const DATA_QUERY_SCOPE_MESSAGE = 'Please ask questions regarding your uploaded student performance data.';
+const DATA_QUERY_KEYWORDS = [
+  'student', 'students', 'roll', 'name', 'names', 'mark', 'marks', 'score', 'scores',
+  'percentage', 'percent', 'pass', 'passed', 'fail', 'failed', 'weak', 'risk',
+  'top', 'best', 'highest', 'lowest', 'average', 'mean', 'rank', 'performer',
+  'performance', 'subject', 'subjects', 'class', 'analytics', 'analysis',
+  'distribution', 'range', 'between', 'above', 'below', 'count', 'total',
+  'grade', 'category', 'dashboard', 'upload', 'data', 'report', 'result',
+  'results', 'insight', 'recommendation', 'improvement', 'strength', 'weakness',
+];
+const OFF_TOPIC_QUERY_PATTERNS = [
+  /\b(hello|hi|hey|bye|good morning|good afternoon|good evening|good night)\b/i,
+  /\bweather\b/i,
+  /\bnews\b/i,
+  /\bjoke\b/i,
+  /\bpoem\b/i,
+  /\bstory\b/i,
+  /\brecipe\b/i,
+  /\bmovie\b/i,
+  /\bsong\b/i,
+  /\blyrics\b/i,
+  /\bcricket\b/i,
+  /\bfootball\b/i,
+  /\bstock\b/i,
+  /\bcrypto\b/i,
+  /\bcapital of\b/i,
+  /\bpresident\b/i,
+  /\bprime minister\b/i,
+  /\bwrite (a )?(code|program|script)\b/i,
+  /\bmake (a )?(code|program|script)\b/i,
+  /\bapi key\b/i,
+  /\bpassword\b/i,
+  /\bignore (previous|all) instructions\b/i,
+  /\bsystem prompt\b/i,
+];
+const CONCEPT_QUERY_PATTERN = /\b(what is|what are|explain|define|meaning of|definition of|teach me|tell me about)\b/i;
+
+function collectKnownQueryTerms() {
+  const terms = new Set();
+  const addTerm = (value) => {
+    const term = String(value || '').trim().toLowerCase();
+    if (term.length >= 2) {
+      terms.add(term);
+    }
+  };
+
+  addTerm(state.currentSubject?.name);
+  addTerm(state.currentUpload?.subjectName);
+  getSubjectSummary().forEach((subject) => addTerm(subject.subjectName));
+  getDashboardStudents().forEach((student) => {
+    addTerm(student.rollNo);
+    addTerm(student.studentName);
+    if (student?.subjectMarks && typeof student.subjectMarks === 'object' && !Array.isArray(student.subjectMarks)) {
+      Object.keys(student.subjectMarks).forEach(addTerm);
+    }
+  });
+
+  return Array.from(terms);
+}
+
+function hasUploadedDataSignal(question) {
+  const normalized = String(question || '').toLowerCase();
+  if (parseQuestionRange(question)) {
+    return true;
+  }
+
+  if (parseQuestionThreshold(question)) {
+    return true;
+  }
+
+  if (DATA_QUERY_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
+    return true;
+  }
+
+  return collectKnownQueryTerms().some((term) => term && normalized.includes(term));
+}
+
+function isMostlyConceptQuestion(question) {
+  const normalized = String(question || '').toLowerCase();
+  if (!CONCEPT_QUERY_PATTERN.test(normalized)) {
+    return false;
+  }
+
+  const metricSignals = DATA_QUERY_KEYWORDS.filter((keyword) => !['subject', 'subjects', 'class', 'data'].includes(keyword));
+  const hasMetricSignal = metricSignals.some((keyword) => normalized.includes(keyword)) || parseQuestionRange(question) || parseQuestionThreshold(question);
+  if (hasMetricSignal) {
+    return false;
+  }
+
+  return collectKnownQueryTerms().some((term) => term && normalized.includes(term));
+}
+
+function hasOffTopicSignal(question) {
+  return OFF_TOPIC_QUERY_PATTERNS.some((pattern) => pattern.test(String(question || '')));
+}
+
+function buildCleanDataQuestion(question) {
+  const normalized = String(question || '').toLowerCase();
+  const range = parseQuestionRange(question);
+  const threshold = parseQuestionThreshold(question);
+  if (range) {
+    return `Which students are in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range?`;
+  }
+  if (threshold) {
+    const direction = ['gt', 'gte'].includes(threshold.operator) ? 'above' : 'below';
+    return `Which students scored ${direction} ${threshold.value} ${threshold.usePercentage ? 'percent' : 'marks'}?`;
+  }
+  if (normalized.includes('failed') || normalized.includes('failure') || normalized.includes('fail')) {
+    return 'Which students failed in the uploaded data?';
+  }
+  if (normalized.includes('weak') || normalized.includes('risk')) {
+    return 'Which students need improvement in the uploaded data?';
+  }
+  if (normalized.includes('top') || normalized.includes('best') || normalized.includes('highest')) {
+    return 'Who are the top performers in the uploaded data?';
+  }
+  if (normalized.includes('average') || normalized.includes('mean')) {
+    return 'What is the class average in the uploaded data?';
+  }
+  if (normalized.includes('subject')) {
+    return 'Which subject has the highest and lowest performance in the uploaded data?';
+  }
+  return 'Show the pass/fail summary for the uploaded data.';
+}
+
+function classifyQuestionScope(question) {
+  const text = String(question || '').trim();
+  if (!text) {
+    return { allowed: false, message: 'Please type a question about your uploaded student performance data.' };
+  }
+
+  if (!hasUploadedDataSignal(text) || isMostlyConceptQuestion(text)) {
+    return { allowed: false, message: DATA_QUERY_SCOPE_MESSAGE };
+  }
+
+  if (hasOffTopicSignal(text)) {
+    return {
+      allowed: false,
+      message: `${DATA_QUERY_SCOPE_MESSAGE} Try asking: "${buildCleanDataQuestion(text)}"`,
+    };
+  }
+
+  return { allowed: true, message: '' };
+}
+
 function getQuestionAnswerFromData(question) {
   const normalized = String(question || '').toLowerCase();
-  const analytics = state.analytics || {};
-  const students = Array.isArray(state.students) ? state.students : [];
+  const analytics = getDashboardAnalytics() || {};
+  const students = Array.isArray(getDashboardStudents()) ? getDashboardStudents() : [];
   const topStudents = getTopPerformers(5);
   const failedStudents = students.filter((student) => String(student.status).toLowerCase() === 'fail').slice(0, 5);
   const weakStudents = getWeakStudents(5);
   const range = parseQuestionRange(question);
+  const threshold = parseQuestionThreshold(question);
 
   if (range) {
     const matches = students.filter((student) => {
@@ -2651,6 +3396,32 @@ function getQuestionAnswerFromData(question) {
 
     return `Students in the ${range.lower} to ${range.upper} ${range.usePercentage ? 'percentage' : 'marks'} range: ${matches
       .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${formatPercent(student.percentage)})`)
+      .join('; ')}.`;
+  }
+
+  if (threshold) {
+    const matches = students.filter((student) => {
+      const value = threshold.usePercentage ? Number(student.percentage) : Number(student.marks);
+      if (!Number.isFinite(value)) return false;
+      if (threshold.operator === 'gt') return value > threshold.value;
+      if (threshold.operator === 'gte') return value >= threshold.value;
+      if (threshold.operator === 'lte') return value <= threshold.value;
+      return value < threshold.value;
+    });
+    const direction = ['gt', 'gte'].includes(threshold.operator) ? 'above' : 'below';
+    const metric = threshold.usePercentage ? 'percentage' : 'marks';
+    const isCountQuestion = /\b(how many|count|number of|total)\b/i.test(normalized);
+
+    if (!matches.length) {
+      return `No students scored ${direction} ${threshold.value} ${metric}.`;
+    }
+
+    if (isCountQuestion) {
+      return `${matches.length} student${matches.length === 1 ? '' : 's'} scored ${direction} ${threshold.value} ${metric}.`;
+    }
+
+    return `Students who scored ${direction} ${threshold.value} ${metric}: ${matches
+      .map((student) => `${student.studentName} (Roll No ${student.rollNo}, ${student.marks} marks, ${formatPercent(student.percentage)})`)
       .join('; ')}.`;
   }
 
@@ -2698,8 +3469,8 @@ async function getGroqAnswer(question) {
     return '';
   }
 
-  const analytics = state.analytics || {};
-  const students = Array.isArray(state.students) ? state.students : [];
+  const analytics = getDashboardAnalytics() || {};
+  const students = Array.isArray(getDashboardStudents()) ? getDashboardStudents() : [];
   const subjectName = state.currentSubject?.name || state.currentUpload?.subjectName || 'Current Subject';
   const context = {
     subjectName,
@@ -2746,9 +3517,31 @@ async function getGroqAnswer(question) {
   try {
     const response = await requestJson(`/api/ai-query/${encodeURIComponent(uploadId)}`, {
       method: 'POST',
-      body: { question, context },
+      body: {
+        question,
+        context,
+        filters: {
+          subject: normalizeFilterValue(state.dashboardFilters.subject),
+          student: normalizeFilterValue(state.dashboardFilters.student),
+        },
+      },
     });
-    return String(response?.answer || '').trim();
+    let answer = response?.answer;
+    if (typeof answer === 'string' && answer.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(answer);
+        answer = parsed?.answer ?? answer;
+      } catch {
+        // Keep original answer.
+      }
+    }
+    if (typeof answer === 'number') {
+      return `Answer: ${answer}`;
+    }
+    if (answer && typeof answer === 'object') {
+      answer = answer.answer ?? answer.message ?? '';
+    }
+    return String(answer || '').trim();
   } catch (error) {
     console.warn('[QUERY API ERROR]', error.message);
     return '';
@@ -2762,6 +3555,15 @@ async function submitQueryForm(form) {
   if (!question) {
     if (answer) {
       answer.textContent = 'Please type a question first.';
+    }
+    return;
+  }
+
+  const scope = classifyQuestionScope(question);
+  if (!scope.allowed) {
+    state.queryReply = scope.message;
+    if (answer) {
+      answer.innerHTML = escapeHtml(scope.message).replace(/\n/g, '<br>');
     }
     return;
   }
@@ -2889,8 +3691,17 @@ async function initializeApp() {
 
   pageHost.addEventListener('input', (event) => {
     if (event.target.matches('#studentSearch')) {
+      const cursorPosition = event.target.selectionStart;
       state.filters.search = event.target.value;
       renderPage();
+      requestAnimationFrame(() => {
+        const searchInput = document.getElementById('studentSearch');
+        if (searchInput) {
+          searchInput.focus();
+          const nextPosition = Math.min(cursorPosition ?? state.filters.search.length, state.filters.search.length);
+          searchInput.setSelectionRange(nextPosition, nextPosition);
+        }
+      });
       return;
     }
   });
