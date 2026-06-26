@@ -141,18 +141,18 @@ a {
   height: 100dvh;
   display: grid;
   place-items: center;
-  padding: clamp(0.8rem, 1.25vw, 1.25rem);
+  padding: 0;
   z-index: 1;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 50% -10%, rgba(37, 99, 235, 0.1), transparent 42%),
-    linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+  margin-top: 2px;
+  background: #f4f8ff;
 }
 
 .auth-bg-shape {
   position: absolute;
   inset: 0 auto auto 0;
   pointer-events: none;
+  display: none;
 }
 
 .auth-bg-left {
@@ -179,19 +179,13 @@ a {
 
 .auth-frame {
   position: relative;
-  width: min(1320px, calc(100vw - 5rem));
-  height: min(760px, calc(100dvh - 2.4rem));
-  min-height: 610px;
   display: grid;
   grid-template-rows: 1fr auto;
   overflow: hidden;
-  border-radius: 24px;
-  border: 1px solid rgba(199, 214, 238, 0.92);
-  background:
-    radial-gradient(circle at 8% 8%, rgba(37, 99, 235, 0.16), transparent 18%),
-    radial-gradient(circle at 92% 92%, rgba(37, 99, 235, 0.13), transparent 16%),
-    linear-gradient(135deg, #f5f9ff 0%, #ffffff 50%, #eef5ff 100%);
-  box-shadow: 0 28px 80px rgba(15, 35, 76, 0.16);
+  width: 100vw;
+  height: 100dvh;
+  min-height: 0;
+  background: url("intro.jpeg") center center / cover no-repeat;
   z-index: 1;
 }
 
@@ -200,10 +194,10 @@ a {
   width: 100%;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(500px, 1fr) minmax(420px, 520px);
-  gap: clamp(1.5rem, 2.5vw, 3rem);
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 31.5%);
+  gap: clamp(1rem, 2vw, 2rem);
   align-items: center;
-  padding: clamp(1.3rem, 2.4vw, 2.35rem) clamp(1.5rem, 3vw, 3.2rem);
+  padding: 4.7% 6.2% 5.5% 5%;
   z-index: 1;
 }
 
@@ -476,14 +470,17 @@ a {
 .leaf-three { left: 36px; top: -34px; transform: rotate(22deg); height: 52px; }
 
 .auth-card {
-  width: min(100%, 500px);
-  justify-self: center;
+  width: 100%;
+  max-width: 500px;
+  position: relative;
+  z-index: 2;
+  justify-self: end;
   border-radius: 24px;
-  padding: clamp(1.45rem, 2.1vw, 2rem);
+  padding: clamp(2.15rem, 3.2dvh, 3.2rem) clamp(1.8rem, 2.4vw, 2.35rem);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.94);
+  background: #fff;
   border-color: rgba(218, 228, 244, 0.95);
   box-shadow: 0 24px 70px rgba(15, 35, 76, 0.13);
 }
@@ -735,6 +732,7 @@ a {
   font-size: 0.86rem;
   flex-wrap: wrap;
   align-items: center;
+  border-radius: 25px;
   background: linear-gradient(135deg, #08275a 0%, #001f4f 100%);
   z-index: 1;
 }
@@ -2040,16 +2038,8 @@ a {
 /* ---------------- Responsive ---------------- */
 @media (max-width: 1280px) {
   .auth-shell {
-    grid-template-columns: 1fr;
-    padding: 2rem;
-  }
-
-  .auth-frame {
-    width: min(980px, calc(100vw - 2rem));
-  }
-
-  .auth-visual {
-    min-height: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 32%);
+    padding: 4.5% 6% 5.5% 5%;
   }
 
   .hero-card,
@@ -2205,23 +2195,27 @@ a {
 
   .auth-frame {
     width: 100%;
+    height: auto;
+    min-height: calc(100dvh - 2rem);
     border-radius: 22px;
+    background-size: cover;
   }
 
   .auth-shell {
     width: 100%;
+    grid-template-columns: 1fr;
     gap: 1rem;
     padding: 1rem;
   }
 
-  .auth-card,
-  .auth-visual {
+  .auth-card {
     padding: 1.4rem;
     border-radius: 26px;
+    justify-self: center;
   }
 
   .auth-visual {
-    padding-inline: 1rem;
+    display: none;
   }
 
   .auth-card {

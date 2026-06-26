@@ -1,232 +1,317 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Student Performance Analytics System</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="site-config.js"></script>
-</head>
-<body>
-  <div class="ambient ambient-one"></div>
-  <div class="ambient ambient-two"></div>
+  <head>
+    
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student Performance Analytics System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="site-config.js"></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
 
-  <section id="authScreen" class="auth-screen">
-    <div class="auth-bg-shape auth-bg-left"></div>
-    <div class="auth-bg-shape auth-bg-right"></div>
+    <section id="authScreen" class="auth-screen">
+      <div class="auth-bg-shape auth-bg-left"></div>
 
-    <div class="auth-frame">
-    <div class="auth-shell">
-      <div class="auth-visual">
-        <div class="auth-dot-grid dot-top" aria-hidden="true"></div>
-        <div class="auth-dot-grid dot-bottom" aria-hidden="true"></div>
-        <div class="auth-logo-mark" aria-hidden="true">
-          <svg viewBox="0 0 120 120" role="presentation">
-            <path d="M60 10 105 32 60 54 15 32 60 10Z" fill="#102c69"/>
-            <path d="M25 40v16c0 13 15 24 35 24s35-11 35-24V40l-35 16-35-16Z" fill="#1d4ed8"/>
-            <path d="M44 58v20M60 52v26M76 58v20" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
-            <path d="M32 72h56" stroke="#102c69" stroke-width="6" stroke-linecap="round"/>
-            <path d="M52 70v30l8-9 8 9V70" fill="#102c69"/>
-          </svg>
-        </div>
+      <div class="auth-bg-shape auth-bg-right"></div>
 
-        <h1>Student Performance<br><span>Analytics System</span></h1>
-        <span class="auth-title-line" aria-hidden="true"></span>
-        <p class="auth-description">
-          Analyze student performance, identify weak areas, recognize top performers, and make data-driven academic decisions.
-        </p>
+      <div class="auth-frame">
+        <div class="auth-shell">
+          <div class="auth-visual">
+            <div class="auth-dot-grid dot-top" aria-hidden="true"></div>
+            <div class="auth-dot-grid dot-bottom" aria-hidden="true"></div>
 
-        <div class="auth-illustration">
-          <div class="desk-lamp"></div>
-          <div class="desk-books">
-            <span class="book book-one"></span>
-            <span class="book book-two"></span>
-            <span class="book book-three"></span>
+            <div class="auth-logo-mark" aria-hidden="true"></div>
           </div>
-          <div class="monitor-card">
-            <div class="monitor-top"></div>
-            <div class="monitor-screen">
-              <div class="monitor-stat-row">
-                <span></span><span></span><span></span><span></span>
+
+          <div class="auth-card">
+            <div class="auth-card-top">
+              <div>
+                <p class="eyebrow">Teacher Portal</p>
+                <h2 style="font-size: 40px">Welcome Back!</h2>
+                <p data-auth-copy>Login to access your dashboard</p>
               </div>
-              <div class="monitor-chart monitor-bars">
-                <span></span><span></span><span></span><span></span><span></span>
+            </div>
+            <br />
+
+            <p class="auth-demo-note">
+              Demo login: <code>demo.teacher@saps.local</code> /
+              <code>Demo@1234</code>
+            </p>
+            <br />
+
+            <form id="loginForm" class="auth-form">
+              <label class="field">
+                <span>Email</span>
+                <div class="input-wrap">
+                  <span class="input-icon" aria-hidden="true">&#9993;</span>
+                  <input
+                    name="email"
+                    type="email"
+                    autocomplete="email"
+                    placeholder="Enter your email"
+                    required
+                  />
+                </div>
+              </label>
+
+              <label class="field">
+                <span>Password</span>
+                <div class="input-wrap">
+                  <span class="input-icon" aria-hidden="true">&#128274;</span>
+                  <input
+                    name="password"
+                    type="password"
+                    autocomplete="current-password"
+                    placeholder="Enter your password"
+                    required
+                  />
+                  <button
+                    class="password-toggle"
+                    type="button"
+                    data-toggle-password
+                    aria-label="Show password"
+                  >
+                    Show
+                  </button>
+                </div>
+              </label>
+
+              <div class="auth-row">
+                <label class="remember-row">
+                  <input name="rememberMe" type="checkbox" checked />
+                  <span>Remember me</span>
+                </label>
+                <button class="link-button" type="button" data-forgot-password>
+                  Forgot Password?
+                </button>
               </div>
-              <div class="monitor-chart monitor-donut"></div>
-            </div>
-          </div>
-          <div class="plant-pot">
-            <span class="leaf leaf-one"></span>
-            <span class="leaf leaf-two"></span>
-            <span class="leaf leaf-three"></span>
+
+              <button class="primary-btn" type="submit">Login</button>
+              <button
+                class="secondary-btn"
+                type="button"
+                data-switch-auth="signup"
+              >
+                Create New Account
+              </button>
+
+              <div
+                id="loginFeedback"
+                class="inline-feedback hidden"
+                role="status"
+                aria-live="polite"
+              ></div>
+            </form>
+
+            <form id="signupForm" class="auth-form hidden">
+              <label class="field">
+                <span>Full Name</span>
+                <div class="input-wrap">
+                  <span class="input-icon" aria-hidden="true">&#128100;</span>
+                  <input
+                    name="fullName"
+                    type="text"
+                    autocomplete="name"
+                    placeholder="Enter your full name"
+                    required
+                  />
+                </div>
+              </label>
+
+              <label class="field">
+                <span>Email</span>
+                <div class="input-wrap">
+                  <span class="input-icon" aria-hidden="true">&#9993;</span>
+                  <input
+                    name="email"
+                    type="email"
+                    autocomplete="email"
+                    placeholder="Enter your email"
+                    required
+                  />
+                </div>
+              </label>
+
+              <label class="field">
+                <span>Password</span>
+                <div class="input-wrap">
+                  <span class="input-icon" aria-hidden="true">&#128274;</span>
+                  <input
+                    name="password"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Create a password"
+                    required
+                  /><br />
+                  <button
+                    class="password-toggle"
+                    type="button"
+                    data-toggle-password
+                    aria-label="Show password"
+                  >
+                    Show
+                  </button>
+                </div>
+              </label>
+
+              <label class="field">
+                <span>Confirm Password</span>
+                <div class="input-wrap">
+                  <span class="input-icon" aria-hidden="true">&#128274;</span>
+                  <input
+                    name="confirmPassword"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Confirm your password"
+                    required
+                  />
+                </div>
+              </label>
+
+              <button class="primary-btn" type="submit">Create Account</button>
+              <button
+                class="secondary-btn"
+                type="button"
+                data-switch-auth="login"
+              >
+                Back to Login
+              </button>
+
+              <p class="switch-copy">
+                Already have an account?
+                <button
+                  class="link-button"
+                  type="button"
+                  data-switch-auth="login"
+                >
+                  Login
+                </button>
+              </p>
+
+              <div
+                id="signupFeedback"
+                class="inline-feedback hidden"
+                role="status"
+                aria-live="polite"
+              ></div>
+            </form>
           </div>
         </div>
-      </div>
 
-      <div class="auth-card">
-        <div class="auth-card-top">
+        <footer class="auth-footer">
+          <span class="footer-secure"
+            >&#128274; Secure. Reliable. Insightful.</span
+          >
+          <span>
+            &copy; 2026 Student Performance Analytics System. All rights
+            reserved.
+          </span>
+        </footer>
+      </div>
+    </section>
+
+    <div id="appShell" class="app-shell hidden">
+      <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
+
+      <aside id="sidebar" class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 120 120" role="presentation">
+              <path d="M60 10 105 32 60 54 15 32 60 10Z" fill="#fff" />
+              <path
+                d="M25 40v16c0 13 15 24 35 24s35-11 35-24V40l-35 16-35-16Z"
+                fill="#1d4ed8"
+              />
+              <path
+                d="M44 58v20M60 52v26M76 58v20"
+                stroke="#fff"
+                stroke-width="7"
+                stroke-linecap="round"
+              />
+              <path
+                d="M32 72h56"
+                stroke="#fff"
+                stroke-width="6"
+                stroke-linecap="round"
+              />
+            </svg>
+          </div>
           <div>
-            <p class="eyebrow">Teacher Portal</p>
-            <h2 data-auth-title>Welcome Back!</h2>
-            <p data-auth-copy>Login to access your dashboard</p>
+            <h1>Student Performance<br />Analytics System</h1>
           </div>
-          <span class="pill">Light Mode Only</span>
         </div>
 
-        <p class="auth-demo-note">
-          Demo login: <code>demo.teacher@saps.local</code> / <code>Demo@1234</code>
-        </p>
+        <nav class="sidebar-nav">
+          <button
+            class="nav-item active"
+            data-home-nav="true"
+            data-view="upload"
+            type="button"
+          >
+            Home / Upload
+          </button>
+          <button class="nav-item" data-view="history" type="button">
+            Upload History
+          </button>
+          <button class="nav-item" data-view="profile" type="button">
+            Profile
+          </button>
+        </nav>
 
-        <form id="loginForm" class="auth-form">
-          <label class="field">
-            <span>Email</span>
-            <div class="input-wrap">
-              <span class="input-icon" aria-hidden="true">✉</span>
-              <input name="email" type="email" autocomplete="email" placeholder="Enter your email" required>
-            </div>
-          </label>
-
-          <label class="field">
-            <span>Password</span>
-            <div class="input-wrap">
-              <span class="input-icon" aria-hidden="true">🔒</span>
-              <input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required>
-              <button class="password-toggle" type="button" data-toggle-password aria-label="Show password">Show</button>
-            </div>
-          </label>
-
-          <div class="auth-row">
-            <label class="remember-row">
-              <input name="rememberMe" type="checkbox" checked>
-              <span>Remember me</span>
-            </label>
-            <button class="link-button" type="button" data-forgot-password>Forgot Password?</button>
-          </div>
-
-          <button class="primary-btn" type="submit">Login</button>
-          <button class="secondary-btn" type="button" data-switch-auth="signup">Create New Account</button>
-
-          <p class="switch-copy">
-            Don’t have an account?
-            <button class="link-button" type="button" data-switch-auth="signup">Sign up</button>
+        <div class="sidebar-card">
+          <div class="sidebar-card-icon">↗</div>
+          <p>
+            Upload subject marks file to analyze student performance instantly.
           </p>
-
-          <div id="loginFeedback" class="inline-feedback hidden" role="status" aria-live="polite"></div>
-        </form>
-
-        <form id="signupForm" class="auth-form hidden">
-          <label class="field">
-            <span>Full Name</span>
-            <div class="input-wrap">
-              <span class="input-icon" aria-hidden="true">👤</span>
-              <input name="fullName" type="text" autocomplete="name" placeholder="Enter your full name" required>
-            </div>
-          </label>
-
-          <label class="field">
-            <span>Email</span>
-            <div class="input-wrap">
-              <span class="input-icon" aria-hidden="true">✉</span>
-              <input name="email" type="email" autocomplete="email" placeholder="Enter your email" required>
-            </div>
-          </label>
-
-          <label class="field">
-            <span>Password</span>
-            <div class="input-wrap">
-              <span class="input-icon" aria-hidden="true">🔒</span>
-              <input name="password" type="password" autocomplete="new-password" placeholder="Create a password" required>
-              <button class="password-toggle" type="button" data-toggle-password aria-label="Show password">Show</button>
-            </div>
-          </label>
-
-          <label class="field">
-            <span>Confirm Password</span>
-            <div class="input-wrap">
-              <span class="input-icon" aria-hidden="true">🔐</span>
-              <input name="confirmPassword" type="password" autocomplete="new-password" placeholder="Confirm your password" required>
-            </div>
-          </label>
-
-          <button class="primary-btn" type="submit">Create Account</button>
-          <button class="secondary-btn" type="button" data-switch-auth="login">Back to Login</button>
-
-          <p class="switch-copy">
-            Already have an account?
-            <button class="link-button" type="button" data-switch-auth="login">Login</button>
-          </p>
-
-          <div id="signupFeedback" class="inline-feedback hidden" role="status" aria-live="polite"></div>
-        </form>
-      </div>
-    </div>
-
-    <footer class="auth-footer">
-      <span class="footer-secure">&#128274; Secure. Reliable. Insightful.</span>
-      <span>© 2024 Student Performance Analytics System. All rights reserved.</span>
-    </footer>
-    </div>
-  </section>
-
-  <div id="appShell" class="app-shell hidden">
-    <div id="sidebarBackdrop" class="sidebar-backdrop hidden"></div>
-
-    <aside id="sidebar" class="sidebar">
-      <div class="brand-block">
-        <div class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 120 120" role="presentation">
-            <path d="M60 10 105 32 60 54 15 32 60 10Z" fill="#fff"/>
-            <path d="M25 40v16c0 13 15 24 35 24s35-11 35-24V40l-35 16-35-16Z" fill="#1d4ed8"/>
-            <path d="M44 58v20M60 52v26M76 58v20" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
-            <path d="M32 72h56" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
-          </svg>
         </div>
-        <div>
-          <h1>Student Performance<br>Analytics System</h1>
-        </div>
-      </div>
 
-      <nav class="sidebar-nav">
-        <button class="nav-item active" data-home-nav="true" data-view="upload" type="button">Home / Upload</button>
-        <button class="nav-item" data-view="history" type="button">Upload History</button>
-        <button class="nav-item" data-view="profile" type="button">Profile</button>
-      </nav>
+        <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
+      </aside>
 
-      <div class="sidebar-card">
-        <div class="sidebar-card-icon">↗</div>
-        <p>Upload subject marks file to analyze student performance instantly.</p>
-      </div>
-
-      <button id="logoutBtn" class="logout-btn" type="button">Logout</button>
-    </aside>
-
-    <div class="main-panel">
-      <header class="topbar">
-        <div class="topbar-left">
-          <button id="sidebarToggle" class="menu-btn" type="button" aria-label="Toggle navigation">☰</button>
-          <div>
-            <h2 id="topbarTitle">Welcome, Teacher!</h2>
-            <p id="topbarSubtitle">Upload subject marks and get AI-powered insights.</p>
+      <div class="main-panel">
+        <header class="topbar">
+          <div class="topbar-left">
+            <button
+              id="sidebarToggle"
+              class="menu-btn"
+              type="button"
+              aria-label="Toggle navigation"
+            >
+              ☰
+            </button>
+            <div>
+              <h2 id="topbarTitle">Welcome, Teacher!</h2>
+              <p id="topbarSubtitle">
+                Upload subject marks and get AI-powered insights.
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div class="topbar-right">
-          <button class="icon-btn" type="button" aria-label="Notifications">🔔</button>
-          <div class="teacher-chip">
-            <span id="teacherInitial">T</span>
-            <span id="teacherName">Teacher</span>
+          <div class="topbar-right">
+            <button class="icon-btn" type="button" aria-label="Notifications">
+              🔔
+            </button>
+            <div class="teacher-chip">
+              <span id="teacherInitial">T</span>
+              <span id="teacherName">Teacher</span>
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main id="pageHost" class="page-host"></main>
+        <main id="pageHost" class="page-host"></main>
+      </div>
     </div>
-  </div>
 
-  <script src="script.js"></script>
-</body>
+    <script src="script.js"></script>
+  </body>
 </html>

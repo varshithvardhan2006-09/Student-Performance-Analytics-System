@@ -1,11 +1,11 @@
 # Student Performance Analytics System
 
-A teacher-focused analytics platform for uploading one subject at a time, validating student marks, generating rankings, detecting weak students, and exporting reports from MongoDB-backed data.
+A teacher-focused analytics platform for uploading single-subject marks or structured multi-subject reports, validating student marks, generating rankings, detecting weak students, and exporting reports from MongoDB-backed data.
 
 ## What the app does
 
 - Secure teacher login and signup
-- Single-subject mark uploads from CSV, Excel, or structured PDF
+- Single-subject and multi-subject mark uploads from CSV, Excel, or structured PDF
 - Automatic validation for file type, duplicate roll numbers, and mark ranges
 - Analytics dashboard with pass/fail, marks distribution, top performers, and weak students
 - AI insights with fallback summaries when Groq is not configured
