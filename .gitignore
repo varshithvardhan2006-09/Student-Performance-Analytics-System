@@ -1,0 +1,23 @@
+# --- dependencies ---
+node_modules/
+backend/node_modules/
+
+# --- local database & build output ---
+.mongodb-data/
+backend/.mongodb-data/
+backend/.mongodb-data.backup.tar.gz
+.dist/
+.agents/
+public/
+
+# --- secrets: NEVER commit .env. .env.example IS committed. ---
+.env
+.env.local
+backend/.env
+backend/.env.local
+
+# --- logs & OS cruft ---
+*.log
+npm-debug.log*
+Thumbs.db
+.DS_Store

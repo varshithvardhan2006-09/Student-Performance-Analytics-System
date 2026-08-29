@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Student Performance Analytics System Architecture</title>
+  <desc id="desc">Local full-stack architecture showing browser frontend, Node Express backend, MongoDB data tier, and optional Groq AI service.</desc>
+  <defs>
+    <linearGradient id="headerGradient" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#eef2ff" />
+      <stop offset="100%" stop-color="#dbeafe" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#1e293b" flood-opacity="0.12" />
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px "Segoe UI", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 15px "Segoe UI", Arial, sans-serif; fill: #475569; }
+      .tier { fill: #ffffff; stroke: #c7d2fe; stroke-width: 2; filter: url(#shadow); }
+      .tier-title { font: 700 18px "Segoe UI", Arial, sans-serif; fill: #1e1b4b; letter-spacing: .4px; }
+      .node { fill: #eef2ff; stroke: #4f46e5; stroke-width: 1.5; }
+      .node-green { fill: #ecfdf5; stroke: #0f766e; stroke-width: 1.5; }
+      .node-yellow { fill: #fffbeb; stroke: #d97706; stroke-width: 1.5; }
+      .label { font: 700 15px "Segoe UI", Arial, sans-serif; fill: #111827; }
+      .small { font: 500 12px "Segoe UI", Arial, sans-serif; fill: #475569; }
+      .edge { stroke: #2563eb; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .edge-dashed { stroke: #0f766e; stroke-width: 2.5; fill: none; stroke-dasharray: 8 7; marker-end: url(#arrow); }
+      .badge { fill: #dbeafe; }
+      .badge-text { font: 700 12px "Segoe UI", Arial, sans-serif; fill: #1d4ed8; }
+    </style>
+  </defs>
+  <rect class="bg" width="1280" height="760" />
+  <rect x="32" y="28" width="1216" height="86" rx="24" fill="url(#headerGradient)" stroke="#bfdbfe" />
+  <text class="title" x="64" y="70">Student Performance Analytics System</text>
+  <text class="subtitle" x="64" y="96">Current local full-stack architecture — zero-build frontend served by Node.js, MongoDB storage, optional Groq AI fallback.</text>
+  <rect class="badge" x="1015" y="54" width="185" height="34" rx="17" />
+  <text class="badge-text" x="1040" y="76">No deployment tier</text>
+  <rect class="tier" x="52" y="158" width="340" height="478" rx="22" />
+  <text class="tier-title" x="82" y="196">Client Tier — Browser</text>
+  <rect class="node" x="82" y="228" width="280" height="62" rx="16" />
+  <text class="label" x="110" y="255">index.html</text>
+  <text class="small" x="110" y="275">Static shell loaded from backend</text>
+  <rect class="node" x="82" y="314" width="280" height="62" rx="16" />
+  <text class="label" x="110" y="341">script.js</text>
+  <text class="small" x="110" y="361">ES module app entry</text>
+  <rect class="node" x="82" y="400" width="280" height="96" rx="16" />
+  <text class="label" x="110" y="427">frontend/src</text>
+  <text class="small" x="110" y="449">state, shell, selectors</text>
+  <text class="small" x="110" y="469">pages, charts, API client</text>
+  <rect class="node-yellow" x="82" y="520" width="280" height="62" rx="16" />
+  <text class="label" x="110" y="547">Authenticated UI</text>
+  <text class="small" x="110" y="567">Upload, dashboard, reports, insights</text>
+  <rect class="tier" x="470" y="158" width="390" height="478" rx="22" />
+  <text class="tier-title" x="500" y="196">Application Tier — Node.js / Express</text>
+  <rect class="node" x="500" y="228" width="330" height="62" rx="16" />
+  <text class="label" x="528" y="255">backend/index.js</text>
+  <text class="small" x="528" y="275">Startup, route wiring, static frontend serving</text>
+  <rect class="node" x="500" y="314" width="150" height="86" rx="16" />
+  <text class="label" x="526" y="342">Middleware</text>
+  <text class="small" x="526" y="363">security, CORS</text>
+  <text class="small" x="526" y="381">auth, upload</text>
+  <rect class="node" x="680" y="314" width="150" height="86" rx="16" />
+  <text class="label" x="710" y="342">Routes</text>
+  <text class="small" x="710" y="363">auth, upload</text>
+  <text class="small" x="710" y="381">analytics, reports</text>
+  <rect class="node" x="500" y="424" width="330" height="96" rx="16" />
+  <text class="label" x="528" y="451">Services</text>
+  <text class="small" x="528" y="473">fileParser, validation, analytics</text>
+  <text class="small" x="528" y="493">queryEngine, aiService, reports</text>
+  <rect class="node-yellow" x="500" y="544" width="330" height="62" rx="16" />
+  <text class="label" x="528" y="571">Environment Config</text>
+  <text class="small" x="528" y="591">JWT, MongoDB, Groq, allowed origins</text>
+  <rect class="tier" x="938" y="190" width="290" height="174" rx="22" />
+  <text class="tier-title" x="968" y="228">Data Tier</text>
+  <rect class="node-green" x="968" y="260" width="230" height="72" rx="16" />
+  <text class="label" x="998" y="288">MongoDB</text>
+  <text class="small" x="998" y="308">7 collections indexed by userId/uploadId</text>
+  <rect class="tier" x="938" y="438" width="290" height="152" rx="22" />
+  <text class="tier-title" x="968" y="476">Optional AI Service</text>
+  <rect class="node-green" x="968" y="508" width="230" height="52" rx="16" />
+  <text class="label" x="998" y="532">Groq API</text>
+  <text class="small" x="998" y="550">Used only when GROQ_API_KEY is set</text>
+  <path class="edge" d="M 362 346 C 410 346, 420 346, 470 346" />
+  <text class="small" x="372" y="330">HTTPS/JSON + Bearer JWT</text>
+  <path class="edge" d="M 860 296 C 895 296, 900 296, 938 296" />
+  <text class="small" x="866" y="280">Mongo native driver</text>
+  <path class="edge-dashed" d="M 830 472 C 884 472, 884 534, 938 534" />
+  <text class="small" x="846" y="512">Optional AI call</text>
+  <path class="edge" d="M 222 290 L 222 314" />
+  <path class="edge" d="M 222 376 L 222 400" />
+  <path class="edge" d="M 665 290 L 665 314" />
+  <path class="edge" d="M 665 400 L 665 424" />
+  <rect x="52" y="674" width="1176" height="46" rx="18" fill="#0f2f6b" />
+  <text x="84" y="703" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="600" fill="#ffffff">Current runtime:</text>
+  <text x="204" y="703" font-family="Segoe UI, Arial, sans-serif" font-size="15" fill="#dbeafe">Browser → Express API/static frontend → MongoDB, with deterministic analytics and optional Groq-backed insights.</text>
+</svg>

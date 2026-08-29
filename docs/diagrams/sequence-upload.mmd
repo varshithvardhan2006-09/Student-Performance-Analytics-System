@@ -1,0 +1,68 @@
+%% SAPS - Sequence Diagram: uploading and analysing a mark sheet
+%% Covers POST /api/upload end to end, including the rejection path.
+sequenceDiagram
+    autonumber
+    actor T as Teacher browser
+    participant UI as pages/upload.js
+    participant API as routes/upload.js
+    participant MW as middleware<br/>auth + rateLimiter + multer
+    participant FP as services/fileParser.js
+    participant VAL as services/validation.js
+    participant AN as services/analytics.js
+    participant DB as MongoDB
+    participant AI as services/aiService.js
+    participant G as Groq API
+
+    T->>UI: choose file, subject, max and passing marks
+    UI->>UI: startProcessing - progress estimate capped at 95 percent
+    UI->>API: POST /api/upload - multipart + Bearer JWT
+
+    API->>MW: verify JWT, apply rate limit, buffer file up to 10MB
+    MW-->>API: req.userId, req.files
+
+    API->>API: getFileSignatureError - magic-byte check
+    alt signature does not match extension
+        API-->>UI: 400 { success:false, message:"... is not a valid PDF file." }
+        UI-->>T: show error, stay on upload page
+    else signature valid
+        API->>FP: parseCSV / parseExcel / parsePDF
+        FP->>FP: normalizeColumnName - flexible headers
+        FP-->>API: normalised records
+
+        API->>VAL: validateRecords with maxMarks and reportType
+        alt validation fails
+            VAL-->>API: { valid:false, errors:[ "Row 4: Marks cannot be negative (got -5)", ... ] }
+            API-->>UI: 400 with the per-row error list
+            UI-->>T: show every offending row
+        else validation passes
+            VAL-->>API: { valid:true }
+            API->>AN: processStudents then calculateAnalytics
+            AN-->>API: ranked students + 11 computed metrics
+
+            API->>DB: insert upload, students, analytics
+            DB-->>API: uploadId
+            API-->>UI: 200 { success:true, uploadId }
+
+            UI->>UI: completeProcessing - bar to 100 percent
+            UI->>API: GET /api/uploads/:id + GET /api/students/:id
+            API->>DB: read upload, analytics, students
+            DB-->>API: documents
+            API-->>UI: dashboard payload
+            UI-->>T: render dashboard + charts
+
+            opt teacher opens the Insights view
+                UI->>API: POST /api/ai-insights/:uploadId
+                API->>AI: generateAiInsights
+                alt GROQ_API_KEY is configured
+                    AI->>G: chat.completions.create - llama-3.1-8b-instant
+                    G-->>AI: natural-language commentary
+                else no key, or Groq unreachable
+                    AI->>AI: generateFallbackInsights - local template
+                end
+                AI-->>API: insight text
+                API->>DB: upsert aiInsights
+                API-->>UI: 200 { insights }
+                UI-->>T: render insights
+            end
+        end
+    end

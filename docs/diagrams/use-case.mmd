@@ -1,0 +1,67 @@
+%% SAPS - Use Case Diagram
+%% One human actor (Teacher). Groq is an optional AI provider participating in the
+%% two AI use cases; MongoDB is internal persistence and is therefore shown in
+%% the architecture diagram rather than here.
+flowchart LR
+    teacher(["Teacher"])
+
+    subgraph SAPS["Student Performance Analytics System"]
+        direction TB
+
+        subgraph ACC["1. Account"]
+            direction TB
+            uc1["Register account"]
+            uc2["Log in / log out"]
+            uc3["View profile and statistics"]
+        end
+
+        subgraph ING["2. Ingestion"]
+            direction TB
+            uc4["Upload mark sheet<br/>CSV / XLSX / PDF"]
+            uc5["Validate file format<br/>and every record"]
+        end
+
+        subgraph ANA["3. Analysis"]
+            direction TB
+            uc6["View analytics dashboard"]
+            uc7["Filter by subject / student"]
+            uc8["Search and page<br/>the student table"]
+        end
+
+        subgraph AIG["4. AI"]
+            direction TB
+            uc9["Generate insights"]
+            uc10["Ask a question<br/>about the data"]
+        end
+
+        subgraph OUT["5. Output"]
+            direction TB
+            uc11["Download PDF / Excel / CSV"]
+            uc12["Browse upload history"]
+            uc13["Delete an upload<br/>cascades to all child data"]
+        end
+    end
+
+    groq(["Groq API<br/>optional provider"])
+
+    teacher --- uc1
+    teacher --- uc2
+    teacher --- uc3
+    teacher --- uc4
+    teacher --- uc6
+    teacher --- uc8
+    teacher --- uc9
+    teacher --- uc10
+    teacher --- uc11
+    teacher --- uc12
+    teacher --- uc13
+
+    uc4 -. "&laquo;include&raquo;" .-> uc5
+    uc6 -. "&laquo;extend&raquo;" .-> uc7
+    uc9 -. "&laquo;include&raquo;" .-> groq
+    uc10 -. "&laquo;include&raquo;" .-> groq
+
+    classDef actor fill:#4F46E5,stroke:#312E81,color:#fff,font-weight:bold
+    classDef ext fill:#0f766e,stroke:#134e4a,color:#fff
+    class teacher actor
+    class groq ext

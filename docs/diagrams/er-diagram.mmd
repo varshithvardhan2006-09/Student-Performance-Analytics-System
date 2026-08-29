@@ -1,0 +1,90 @@
+%% SAPS - Entity Relationship Diagram
+%% Seven MongoDB collections. Relationships are enforced in application code
+%% (native driver, no ODM); DELETE /api/uploads/:id cascades manually.
+erDiagram
+    USERS ||--o{ UPLOADS      : "creates"
+    USERS ||--o{ STUDENTS     : "owns"
+    USERS ||--o{ ANALYTICS    : "owns"
+    USERS ||--o{ AI_INSIGHTS  : "owns"
+    USERS ||--o{ REPORTS      : "owns"
+    USERS ||--o{ SUBJECTS     : "defines"
+
+    UPLOADS ||--o{ STUDENTS    : "contains"
+    UPLOADS ||--|| ANALYTICS   : "summarised by"
+    UPLOADS ||--o| AI_INSIGHTS : "explained by"
+    UPLOADS ||--o{ REPORTS     : "exported as"
+
+    USERS {
+        ObjectId _id PK
+        string   fullName
+        string   email
+        string   emailKey UK "lowercased and unique"
+        string   passwordHash "bcrypt cost 12"
+        string   role "always lowercase"
+        Date     createdAt
+    }
+
+    UPLOADS {
+        ObjectId _id PK
+        ObjectId userId FK
+        string   fileName
+        string   subjectName
+        string   reportType "single | multiple"
+        number   maxMarks
+        number   passingMarks
+        string   status
+        Date     uploadDate
+    }
+
+    STUDENTS {
+        ObjectId _id PK
+        ObjectId uploadId FK
+        ObjectId userId FK
+        string   rollNo
+        string   studentName
+        number   marks
+        number   percentage
+        string   status "Pass | Fail"
+        string   category "Top Performer | Average Performer | Weak Student | Failed"
+        number   rank
+        object   subjectMarks "multi-subject uploads only"
+    }
+
+    ANALYTICS {
+        ObjectId _id PK
+        ObjectId uploadId FK "unique index"
+        ObjectId userId FK
+        number   totalStudents
+        number   passedStudents
+        number   failedStudents
+        number   averageMarks
+        number   highestMarks
+        number   lowestMarks
+        number   passPercentage
+        number   failPercentage
+        object   marksDistribution "five percentage bands"
+        array    subjectSummary "per subject, multi-subject only"
+        string   reportType
+    }
+
+    AI_INSIGHTS {
+        ObjectId _id PK
+        ObjectId uploadId FK
+        ObjectId userId FK
+        string   content "Groq output or template fallback"
+        Date     generatedAt
+    }
+
+    REPORTS {
+        ObjectId _id PK
+        ObjectId userId FK
+        ObjectId uploadId FK
+        string   format "pdf | excel | csv"
+        Date     createdAt
+    }
+
+    SUBJECTS {
+        ObjectId _id PK
+        ObjectId userId FK
+        string   name
+    }

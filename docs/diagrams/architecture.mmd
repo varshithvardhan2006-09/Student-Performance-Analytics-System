@@ -1,0 +1,60 @@
+%% SAPS - System Architecture
+%% Three tiers plus one optional optional AI service.
+flowchart TB
+    subgraph CLIENT["Client tier - browser"]
+        direction TB
+        HTML["index.html<br/>static shell"]
+        ENTRY["script.js<br/>ES module entry"]
+        subgraph FESRC["frontend/src/"]
+            direction LR
+            FSTATE["state.js<br/>shell.js<br/>selectors.js"]
+            FAPI["api/<br/>client.js, config.js"]
+            FPAGES["pages/<br/>7 views"]
+            FCHART["charts/<br/>renderer.js"]
+        end
+        HTML --> ENTRY --> FESRC
+    end
+
+    subgraph SERVER["Application tier - Node.js 22 / Express 5"]
+        direction TB
+        IDX["index.js<br/>wiring &amp; startup"]
+        subgraph MW["src/middleware/"]
+            direction LR
+            SEC["security.js"]
+            CORS["cors.js"]
+            RL["rateLimiter.js"]
+            AUTH["auth.js"]
+            UPM["upload.js<br/>multer, 10MB"]
+        end
+        subgraph RT["src/routes/ - 18 endpoints"]
+            direction LR
+            R1["health<br/>auth"]
+            R2["upload<br/>analytics<br/>students"]
+            R3["ai<br/>reports<br/>uploads"]
+        end
+        subgraph SV["src/services/"]
+            direction LR
+            S1["fileParser.js"]
+            S2["validation.js"]
+            S3["analytics.js"]
+            S4["aiService.js"]
+        end
+        CFG["src/config/env.js"]
+        IDX --> MW --> RT --> SV
+        CFG -.-> IDX
+    end
+
+    subgraph DATA["Data tier"]
+        MONGO[("MongoDB<br/>7 collections<br/>indexed on userId + uploadId")]
+    end
+
+    GROQ["Groq API<br/>llama-3.1-8b-instant<br/>OPTIONAL - template fallback"]
+
+    FAPI -->|"HTTPS + JSON<br/>Bearer JWT"| IDX
+    SV -->|"native driver"| MONGO
+    S4 -.->|"HTTPS, only if<br/>GROQ_API_KEY is set"| GROQ
+
+    classDef tier fill:#eef2ff,stroke:#4F46E5,color:#1e1b4b
+    classDef ext fill:#ecfdf5,stroke:#0f766e,color:#064e3b
+    class CLIENT,SERVER,DATA tier
+    class GROQ ext
