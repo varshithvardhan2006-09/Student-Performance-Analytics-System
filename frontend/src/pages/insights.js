@@ -19,7 +19,6 @@ function renderInsightSection(title, text, extraClass = '') {
   const cleanedText = cleanInsightText(text);
   return `
     <article class="insight-card ${extraClass}">
-      <p class="eyebrow">${escapeHtml(title)}</p>
       <div class="ai-answer">${escapeHtml(cleanedText || 'No data yet.').replace(/\n/g, '<br>')}</div>
     </article>
   `;
@@ -118,7 +117,6 @@ function renderInsightsPage() {
     <section class="page">
       <div class="hero-card page-card">
         <div>
-          <p class="eyebrow">AI Insights &amp; Report Generation</p>
           <h1 class="page-title">Find trends in your class results and generate detailed reports.</h1>
           <p class="page-copy">Subject: ${escapeHtml(upload.subjectName)} | Class: ${escapeHtml(upload.className)}</p>
         </div>
@@ -141,7 +139,6 @@ function renderInsightsPage() {
         <section class="chart-card large">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Performance Trend</p>
               <h3>Track performance improvement over time</h3>
             </div>
           </div>
@@ -153,7 +150,6 @@ function renderInsightsPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Marks Distribution</p>
               <h3>Performance by Range</h3>
             </div>
           </div>
@@ -165,7 +161,6 @@ function renderInsightsPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Top Performers</p>
               <h3>Top 5 Students</h3>
             </div>
           </div>
@@ -186,7 +181,6 @@ function renderInsightsPage() {
 
       <div class="report-grid">
         <section class="insight-card large">
-          <p class="eyebrow">Ask Doubts or Query</p>
           <h3>Ask any question about your data and get an instant answer.</h3>
           <form id="queryForm" class="ai-query">
             <input id="queryInput" type="text" placeholder="Which topics do students find most difficult?">
@@ -196,7 +190,6 @@ function renderInsightsPage() {
         </section>
 
         <section class="insight-card">
-          <p class="eyebrow">Top Strengths</p>
           <h3>What is going well</h3>
           <div class="tag-list">
             ${strengthTags.map((text) => `<span class="tag">${escapeHtml(text)}</span>`).join('')}
@@ -204,7 +197,6 @@ function renderInsightsPage() {
         </section>
 
         <section class="insight-card">
-          <p class="eyebrow">Areas for Improvement</p>
           <h3>Where to focus next</h3>
           <div class="tag-list">
             ${improvementTags.map((text) => `<span class="tag">${escapeHtml(text)}</span>`).join('')}
@@ -212,7 +204,6 @@ function renderInsightsPage() {
         </section>
 
         <section class="insight-card">
-          <p class="eyebrow">Report Generation</p>
           <h3>Download files for submission</h3>
           <div class="report-options">
             <select id="reportTypeSelect">
@@ -228,7 +219,6 @@ function renderInsightsPage() {
       <section class="page-card">
         <div class="card-head">
           <div>
-            <p class="eyebrow">AI Insights</p>
             <h3>Focused summary</h3>
             <p>The cards below show only useful insights from the uploaded student data.</p>
           </div>
@@ -241,7 +231,6 @@ function renderInsightsPage() {
         </div>
 
         <div class="page-card" style="margin-top:1rem;background:#f8fbff;">
-          <p class="eyebrow">AI Disclaimer</p>
           <p class="page-copy">Insights are generated using the uploaded data. Please review the results alongside your own teaching expertise before making decisions.</p>
         </div>
       </section>

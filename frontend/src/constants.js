@@ -13,7 +13,7 @@ const STORAGE_KEYS = {
 const PAGE_META = {
   upload: {
     title: 'Welcome, Teacher!',
-    subtitle: 'Upload subject marks and get AI-powered insights.',
+    subtitle: 'Upload subject marks and see how your class performed.',
   },
   dashboard: {
     title: 'Analytics Dashboard',

@@ -10,8 +10,19 @@ const { isPlainObject } = require('../utils/validators');
 // the query engine and the AI insights all use this one value.
 const WEAK_THRESHOLD_PERCENT = 40;
 
-function buildStudentPerformance(student, marks, maxMarks, passingMarks, rank = student.rank || 0) {
-  const { marks: safeMarks, percentage, status, category } = classifyPerformance(marks, maxMarks, passingMarks);
+/**
+ * In a multi-subject report a student passes only by clearing the passing mark
+ * in every subject, so one failed subject fails the report as a whole.
+ */
+function hasFailedSubject(subjectMarks, passingMarks) {
+  return Object.values(extractSubjectMarks({ subjectMarks })).some((value) => {
+    const mark = parseFloat(value);
+    return Number.isFinite(mark) && mark < Number(passingMarks);
+  });
+}
+
+function buildStudentPerformance(student, marks, maxMarks, passingMarks, rank = student.rank || 0, forceFail = false) {
+  const { marks: safeMarks, percentage, status, category } = classifyPerformance(marks, maxMarks, passingMarks, forceFail);
 
   return {
     ...student,
@@ -105,7 +116,8 @@ function buildFilteredDashboardData(uploadDoc, students, analytics, subjectFilte
       student.marks,
       maxMarks,
       passingMarks,
-      student.rank
+      student.rank,
+      subjectNames.length > 0 && hasFailedSubject(student.subjectMarks, passingMarks)
     ));
   }
 
@@ -164,15 +176,16 @@ function buildFilteredDashboardData(uploadDoc, students, analytics, subjectFilte
  * @param {number} marks        marks obtained
  * @param {number} maxMarks     maximum possible marks
  * @param {number} passingMarks minimum marks required to pass
+ * @param {boolean} [forceFail] true when the student already failed on another rule
  * @returns {{marks:number, percentage:number, status:string, category:string}}
  */
-function classifyPerformance(marks, maxMarks, passingMarks) {
+function classifyPerformance(marks, maxMarks, passingMarks, forceFail = false) {
   const numericMarks = Number(marks);
   const safeMarks = Number.isFinite(numericMarks) ? numericMarks : 0;
   const safeMax = Number(maxMarks) > 0 ? Number(maxMarks) : 100;
 
   const percentage = parseFloat(((safeMarks / safeMax) * 100).toFixed(2));
-  const status = safeMarks >= Number(passingMarks) ? 'Pass' : 'Fail';
+  const status = !forceFail && safeMarks >= Number(passingMarks) ? 'Pass' : 'Fail';
 
   let category;
   if (status === 'Fail') {
@@ -200,7 +213,12 @@ function processStudents(records, maxMarks, passingMarks, reportType = 'single')
       const marks = subjectValues.length > 0
         ? parseFloat((subjectValues.reduce((sum, value) => sum + value, 0) / subjectValues.length).toFixed(2))
         : 0;
-      const { percentage, status, category } = classifyPerformance(marks, maxMarks, passingMarks);
+      const { percentage, status, category } = classifyPerformance(
+        marks,
+        maxMarks,
+        passingMarks,
+        hasFailedSubject(subjectMarks, passingMarks)
+      );
 
       return {
         rollNo: String(record.rollNo).trim(),

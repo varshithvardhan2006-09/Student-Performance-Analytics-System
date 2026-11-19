@@ -25,7 +25,6 @@ function renderProfilePage() {
     <section class="page">
       <div class="hero-card page-card">
         <div>
-          <p class="eyebrow">Profile</p>
           <h1 class="page-title">${escapeHtml(profile.fullName)}</h1>
           <p class="page-copy">${escapeHtml(profile.email)} | ${escapeHtml(profile.role || 'teacher')}</p>
         </div>
@@ -36,14 +35,12 @@ function renderProfilePage() {
 
       <div class="profile-grid">
         <article class="profile-card">
-          <p class="eyebrow">Teacher Details</p>
           <strong>${escapeHtml(profile.fullName)}</strong>
           <p>${escapeHtml(profile.email)}</p>
           <div class="profile-tag">Joined ${escapeHtml(formatDate(joinedDate))}</div>
         </article>
 
         <article class="profile-card">
-          <p class="eyebrow">Access Level</p>
           <strong>${escapeHtml(profile.role || 'teacher')}</strong>
           <p>You can upload one or more subject files, review analytics, and export reports.</p>
           <div class="profile-tag">Protected by JWT</div>

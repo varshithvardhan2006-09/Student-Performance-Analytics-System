@@ -173,26 +173,43 @@ function parseExcel(buffer) {
 /**
  * Parse PDF buffer into records
  */
+// Text extracted from a PDF has no real columns, so rows are split on tabs or
+// pipes when the table uses them and on whitespace otherwise.
+function splitPdfLine(line) {
+  const cells = /[\t|]/.test(line) ? line.split(/[\t|]/) : line.split(/\s+/);
+  return cells.map((part) => part.trim()).filter(Boolean);
+}
+
+// A roll number looks like an id: letters, digits, "-", "/" or "_", with at
+// least one digit. This keeps page footers and titles out of the records.
+function looksLikeRollNo(value) {
+  return /^[A-Za-z0-9][A-Za-z0-9/_-]*$/.test(value) && /\d/.test(value);
+}
+
+function isPageFooter(line) {
+  return /^(page\s+\d+(\s*(of|\/)\s*\d+)?|\d+\s*(of|\/)\s*\d+)$/i.test(line.trim());
+}
+
 function parsePDFTextToRecords(text) {
-  const lines = String(text || '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+  const lines = String(text || '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0 && !isPageFooter(line));
   const records = [];
   let subjectHeaders = [];
   let headerFound = false;
 
-  const splitLine = (line) => line.split(/\s+/).map((part) => part.trim()).filter(Boolean);
-
   for (const line of lines) {
-    const parts = splitLine(line);
+    const parts = splitPdfLine(line);
     if (parts.length < 3) {
       continue;
     }
 
-    const normalized = parts.map((part) => cleanHeaderLabel(part).toLowerCase());
-    const isRollHeader = normalized[0] === 'roll' && normalized[1] === 'no';
-    const isStudentHeader = normalized[2] === 'student' && normalized[3] === 'name';
+    const normalized = parts.map((part) => cleanHeaderLabel(part).toLowerCase().replace(/[.:]/g, ''));
+    const nameIndex = normalized.findIndex((part, index) => index > 0 && (part === 'name' || part === 'studentname'));
+    const isHeaderLine = !headerFound
+      && nameIndex > 0
+      && normalized.slice(0, nameIndex).some((part) => part === 'roll' || part === 'rollno' || part === 'roll no' || part === 'id');
 
-    if (!headerFound && isRollHeader && isStudentHeader && parts.length >= 5) {
-      subjectHeaders = parts.slice(4).map((part) => cleanHeaderLabel(part)).filter(Boolean);
+    if (isHeaderLine) {
+      subjectHeaders = parts.slice(nameIndex + 1).map((part) => cleanHeaderLabel(part)).filter(Boolean);
       headerFound = subjectHeaders.length > 0;
       continue;
     }
@@ -208,7 +225,7 @@ function parsePDFTextToRecords(text) {
       const subjectValues = parts.slice(-subjectCount);
       const hasNumericSubjectValues = subjectValues.every((value) => Number.isFinite(parseFloat(value)));
 
-      if (!hasNumericSubjectValues) {
+      if (!looksLikeRollNo(rollNo) || !studentName || !hasNumericSubjectValues) {
         continue;
       }
 
@@ -222,36 +239,29 @@ function parsePDFTextToRecords(text) {
       }
 
       const subjectMarks = {};
-      let validRow = true;
       for (let index = 0; index < subjectHeaders.length; index++) {
-        const subjectName = subjectHeaders[index];
-        const value = subjectValues[index];
-        if (value === undefined || value === null || String(value).trim() === '') {
-          validRow = false;
-          break;
-        }
-        subjectMarks[subjectName] = value;
+        subjectMarks[subjectHeaders[index]] = subjectValues[index];
       }
 
-      if (validRow) {
-        records.push({
-          rollNo,
-          studentName,
-          subjectMarks,
-        });
-      }
+      records.push({
+        rollNo,
+        studentName,
+        subjectMarks,
+      });
     }
   }
 
+  // No header row: accept "roll no, name..., marks" lines.
   if (records.length === 0) {
     for (const line of lines) {
-      const parts = splitLine(line);
+      const parts = splitPdfLine(line);
       if (parts.length >= 3) {
         const lastPart = parts[parts.length - 1];
-        if (!isNaN(parseFloat(lastPart))) {
+        const studentName = parts.slice(1, parts.length - 1).join(' ');
+        if (looksLikeRollNo(parts[0]) && studentName && !isNaN(parseFloat(lastPart))) {
           records.push({
             rollNo: parts[0],
-            studentName: parts.slice(1, parts.length - 1).join(' '),
+            studentName,
             marks: lastPart
           });
         }
@@ -351,6 +361,7 @@ async function parsePDF(buffer, fileName = 'uploaded.pdf') {
 }
 
 module.exports = {
+  parsePDFTextToRecords,
   normalizeRecords,
   parseCSV,
   parseExcel,

@@ -8,6 +8,7 @@ import { buildStudentInsights, calculateLocalDashboardFilter, formatSubjectMark,
 import { renderEmptyState, renderPage } from '../shell.js';
 import { state } from '../state.js';
 import { escapeHtml, formatDate, formatPercent } from '../utils/format.js';
+import { icon } from '../utils/icons.js';
 function renderSummaryCards() {
   const analytics = getDashboardAnalytics();
   if (!analytics) {
@@ -53,7 +54,6 @@ function renderDashboardFilters() {
   return `
     <section class="dashboard-filter-card">
       <div>
-        <p class="eyebrow">Dashboard Filters</p>
         <h3>Refine Analytics View</h3>
       </div>
       <div class="dashboard-filter-grid">
@@ -95,7 +95,6 @@ function renderActiveFilterSummary() {
   return `
     <section class="active-filter-card">
       <div>
-        <p class="eyebrow">Filtered Result</p>
         <h3>Showing ${escapeHtml(studentText)} in ${escapeHtml(subjectText)}</h3>
         <p>${escapeHtml(students.length)} matching record${students.length === 1 ? '' : 's'} found from the selected filters.</p>
       </div>
@@ -141,7 +140,6 @@ function renderSubjectSummaryPanel() {
     <section class="table-card subject-summary-card">
       <div class="table-head compact">
         <div>
-          <p class="eyebrow">Subject Wise Analysis</p>
           <h3>Multi-Subject Performance</h3>
         </div>
       </div>
@@ -228,7 +226,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card large">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Subject Wise</p>
             <h3>Subject-wise Marks</h3>
           </div>
         </div>
@@ -240,7 +237,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card large">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Distribution</p>
             <h3>Subject Performance Distribution</h3>
           </div>
         </div>
@@ -252,7 +248,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card large">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Strength Map</p>
             <h3>Strengths vs Weak Subjects</h3>
           </div>
         </div>
@@ -264,7 +259,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card large">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Comparison</p>
             <h3>Student vs Class Average</h3>
           </div>
         </div>
@@ -296,7 +290,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card large">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Comparison</p>
             <h3>Student Score vs Class Average</h3>
           </div>
         </div>
@@ -308,7 +301,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card large subject-breakdown-card">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Breakdown</p>
             <h3>Subject Performance Breakdown</h3>
           </div>
         </div>
@@ -333,7 +325,7 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
         <div class="breakdown-recommendations">
           <strong>Insights & Recommendations</strong>
           ${recommendations.map((item, index) => `
-            <p><span>${index < 2 ? '✓' : '!'}</span>${escapeHtml(item)}</p>
+            <p><span>${icon(index < 2 ? 'check' : 'alert', 14)}</span>${escapeHtml(item)}</p>
           `).join('')}
         </div>
       </section>
@@ -341,7 +333,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       <section class="chart-card full">
         <div class="card-head">
           <div>
-            <p class="eyebrow">Status</p>
             <h3>Performance Status</h3>
           </div>
           <span class="badge">${escapeHtml(statusLabel)}</span>
@@ -357,8 +348,7 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
     <section class="page">
       <div class="hero-card page-card">
         <div>
-          <p class="eyebrow">Personalized Analytics</p>
-          <h1 class="page-title">${escapeHtml(student.studentName)} • ${escapeHtml(subjectLabel)}</h1>
+          <h1 class="page-title">${escapeHtml(student.studentName)} - ${escapeHtml(subjectLabel)}</h1>
           <p class="page-copy">Roll No ${escapeHtml(student.rollNo)} | Class: ${escapeHtml(upload.className)} | Uploaded on: ${escapeHtml(formatDate(upload.uploadDate))}</p>
           <div class="hero-info">
             <span class="badge">Mode: ${escapeHtml(selectedSubject ? 'Student + Subject' : 'Student + All Subjects')}</span>
@@ -379,7 +369,6 @@ function renderStudentDashboardPage(activeFilterInfo = getActiveDashboardFilterI
       ${selectedSubject ? exactSubjectVisuals : allSubjectVisuals}
 
       <section class="insight-card student-insight-card">
-        <p class="eyebrow">Personalized Insights</p>
         <h3>${escapeHtml(selectedSubject ? `${student.studentName} in ${subjectLabel}` : `${student.studentName} across all subjects`)}</h3>
         <p>${escapeHtml(insights.summary)}</p>
         <div class="insight-list">
@@ -426,7 +415,6 @@ function renderDashboardPage() {
     <section class="page">
       <div class="hero-card page-card">
         <div>
-          <p class="eyebrow">Welcome, Teacher!</p>
           <h1 class="page-title">Subject: ${escapeHtml(upload.subjectName)}</h1>
           <p class="page-copy">Class: ${escapeHtml(upload.className)} | Uploaded on: ${escapeHtml(formatDate(upload.uploadDate))}</p>
           <div class="hero-info">
@@ -461,7 +449,6 @@ function renderDashboardPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Performance</p>
               <h3>Pass / Fail Distribution</h3>
             </div>
           </div>
@@ -473,7 +460,6 @@ function renderDashboardPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Analysis</p>
               <h3>Marks Distribution</h3>
             </div>
           </div>
@@ -485,7 +471,6 @@ function renderDashboardPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Top Performers</p>
               <h3>Top 5 Students</h3>
             </div>
           </div>
@@ -499,7 +484,6 @@ function renderDashboardPage() {
         <section class="chart-card large">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Performance Table</p>
               <h3>Top Performers</h3>
             </div>
           </div>
@@ -520,7 +504,6 @@ function renderDashboardPage() {
         <section class="chart-card large">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Support List</p>
               <h3>Weak Students</h3>
             </div>
           </div>
@@ -541,7 +524,6 @@ function renderDashboardPage() {
         <section class="chart-card">
           <div class="card-head">
             <div>
-              <p class="eyebrow">Status</p>
               <h3>Category Distribution</h3>
             </div>
           </div>
@@ -554,7 +536,6 @@ function renderDashboardPage() {
       <section class="table-card">
         <div class="table-head">
           <div>
-            <p class="eyebrow">All Students Performance</p>
             <h3>Student Performance Table</h3>
           </div>
           <div class="table-toolbar">

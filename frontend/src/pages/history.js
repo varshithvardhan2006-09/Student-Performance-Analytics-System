@@ -24,7 +24,6 @@ function renderHistoryPage() {
     <section class="page">
       <div class="hero-card page-card">
         <div>
-          <p class="eyebrow">Upload History</p>
           <h1 class="page-title">Store every analysis</h1>
           <p class="page-copy">Use history to reopen analytics, download reports, or remove old uploads.</p>
         </div>
@@ -36,7 +35,6 @@ function renderHistoryPage() {
       <section class="history-card">
         <div class="table-head">
           <div>
-            <p class="eyebrow">Saved Uploads</p>
             <h3>All processed subject files</h3>
           </div>
           <span class="badge">${state.history.length} uploads</span>

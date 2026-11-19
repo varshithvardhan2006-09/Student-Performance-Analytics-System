@@ -10,12 +10,12 @@ import { completeProcessing, startProcessing } from './processing.js';
 import { renderPage, setView } from '../shell.js';
 import { state } from '../state.js';
 import { delay, escapeHtml, formatErrorDetails } from '../utils/format.js';
+import { icon } from '../utils/icons.js';
 function renderUploadPage() {
   return `
     <section class="page">
       <div class="hero-card page-card">
         <div>
-          <p class="eyebrow">Home / Upload</p>
           <h1 class="page-title">Upload Subject Marks</h1>
           <p class="page-copy">Upload single-subject marks files or structured multi-subject reports to generate performance analytics.</p>
           <div class="hero-info">
@@ -36,7 +36,6 @@ function renderUploadPage() {
         <section class="page-card">
           <div class="page-head">
             <div>
-              <p class="eyebrow">1. Subject Details</p>
               <h3>Upload Subject Marks</h3>
               <p>Use the same subject details your teacher record uses in MongoDB.</p>
             </div>
@@ -84,7 +83,7 @@ function renderUploadPage() {
             <div class="field">
               <span>Choose File *</span>
               <label id="dropZone" class="drop-zone" for="marksFile">
-                <div class="drop-icon">⇪</div>
+                <div class="drop-icon">${icon('upload', 28)}</div>
                 <strong>Drag and drop your file here</strong>
                 <span>or</span>
                 <button class="ghost-btn" type="button" id="chooseFileBtn">Choose File</button>
@@ -102,20 +101,18 @@ function renderUploadPage() {
 
         <aside class="upload-side">
           <section class="check-card">
-            <p class="eyebrow">File Requirements</p>
             <h3>Keep the upload clean</h3>
             <ul class="check-list">
-              <li><span class="check-icon">✓</span><span>File must be CSV, Excel, or structured PDF.</span></li>
-              <li><span class="check-icon">✓</span><span>File should not be empty.</span></li>
-              <li><span class="check-icon">✓</span><span>Required columns: Roll No, Student Name, and Marks or subject columns.</span></li>
-              <li><span class="check-icon">✓</span><span>Marks should be numeric and within the maximum marks range.</span></li>
-              <li><span class="check-icon">✓</span><span>No duplicate roll numbers.</span></li>
-              <li><span class="check-icon">✓</span><span>Multi-subject reports may include one column per subject.</span></li>
+              <li><span class="check-icon">${icon('check', 14)}</span><span>File must be CSV, Excel, or structured PDF.</span></li>
+              <li><span class="check-icon">${icon('check', 14)}</span><span>File should not be empty.</span></li>
+              <li><span class="check-icon">${icon('check', 14)}</span><span>Required columns: Roll No, Student Name, and Marks or subject columns.</span></li>
+              <li><span class="check-icon">${icon('check', 14)}</span><span>Marks should be numeric and within the maximum marks range.</span></li>
+              <li><span class="check-icon">${icon('check', 14)}</span><span>No duplicate roll numbers.</span></li>
+              <li><span class="check-icon">${icon('check', 14)}</span><span>Multi-subject reports may include one column per subject.</span></li>
             </ul>
           </section>
 
           <section class="check-card alt">
-            <p class="eyebrow">Required Columns</p>
             <h3>Your file must contain</h3>
             <ul class="check-list">
               <li><span class="check-icon">1</span><span><strong>Roll No</strong></span></li>
@@ -125,7 +122,6 @@ function renderUploadPage() {
           </section>
 
           <section class="check-card note">
-            <p class="eyebrow">Note</p>
             <h3>After upload</h3>
             <p>Once the file is processed, the system will take you to the analytics dashboard automatically. For multi-subject PDFs, keep the header row with Roll No, Student Name, and each subject column.</p>
           </section>
@@ -227,14 +223,14 @@ function updateSelectedFileLabel(fileOrFiles) {
 
   if (files.length === 1) {
     const size = Math.max(1, Math.round((files[0].size || 0) / 1024));
-    label.textContent = `${files[0].name} • ${size} KB`;
+    label.textContent = `${files[0].name} (${size} KB)`;
     return;
   }
 
   if (files.length > 1) {
     const totalSize = files.reduce((sum, currentFile) => sum + (currentFile?.size || 0), 0);
     const size = Math.max(1, Math.round(totalSize / 1024));
-    label.textContent = `${files.length} files selected • ${size} KB total`;
+    label.textContent = `${files.length} files selected (${size} KB total)`;
     return;
   }
 

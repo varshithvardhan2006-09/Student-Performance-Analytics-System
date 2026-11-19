@@ -6,6 +6,7 @@
 import { renderPage, renderSidebar } from '../shell.js';
 import { state } from '../state.js';
 import { escapeHtml } from '../utils/format.js';
+import { icon } from '../utils/icons.js';
 function renderProcessingPage() {
   const upload = state.processing;
   const progress = Math.max(0, Math.min(100, upload.progress || 0));
@@ -29,7 +30,6 @@ function renderProcessingPage() {
       <div class="processing-card">
         <div class="page-head">
           <div>
-            <p class="eyebrow">File Validation &amp; Processing</p>
             <h3>Please wait while we validate and process your uploaded file.</h3>
             <p>${escapeHtml(upload.fileName || 'Selected file')}</p>
           </div>
@@ -51,12 +51,11 @@ function renderProcessingPage() {
 
         <div class="section-split" style="margin-top:1rem;">
           <section class="check-card">
-            <p class="eyebrow">Validation Results</p>
             <h3>Checks completed before analytics</h3>
             <ul class="check-list">
               ${validationItems.map((item) => `
                 <li class="${item.done ? 'done' : ''}">
-                  <span class="check-icon">${item.done ? '✓' : '○'}</span>
+                  <span class="check-icon">${icon(item.done ? 'check' : 'circle', 14)}</span>
                   <span>${escapeHtml(item.title)}</span>
                   <span class="step-state">${escapeHtml(item.state)}</span>
                 </li>
@@ -65,13 +64,12 @@ function renderProcessingPage() {
           </section>
 
           <section class="check-card alt">
-            <p class="eyebrow">Processing Status</p>
             <h3>Current workflow</h3>
             <div class="step-list">
               ${stepData.map((step) => `
                 <div class="step-item ${step.done ? 'done' : step.active ? 'active' : ''}">
                   <div class="left">
-                    <span class="step-bullet">${step.done ? '✓' : step.active ? '•' : '○'}</span>
+                    <span class="step-bullet">${icon(step.done ? 'check' : step.active ? 'dot' : 'circle', 14)}</span>
                     <span>${escapeHtml(step.title)}</span>
                   </div>
                   <span class="step-state">${escapeHtml(step.state)}</span>

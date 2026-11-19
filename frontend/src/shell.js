@@ -16,6 +16,7 @@ import { renderUploadPage, submitUploadForm } from './pages/upload.js';
 import { resetStudentTableFilters } from './selectors.js';
 import { state } from './state.js';
 import { escapeHtml } from './utils/format.js';
+import { icon } from './utils/icons.js';
 function setView(view) {
   state.view = view;
   const meta = PAGE_META[view] || PAGE_META.upload;
@@ -55,12 +56,12 @@ function renderTopbarToggle() {
   }
 
   if (state.view === 'processing') {
-    sidebarToggle.textContent = '←';
+    sidebarToggle.innerHTML = icon('arrowLeft', 22);
     sidebarToggle.setAttribute('aria-label', 'Back to upload');
     return;
   }
 
-  sidebarToggle.textContent = '☰';
+  sidebarToggle.innerHTML = icon('menu', 22);
   sidebarToggle.setAttribute('aria-label', 'Toggle navigation');
 }
 
