@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start server",
+      "type": "npm",
+      "script": "start",
+      "path": "backend",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Run tests",
+      "type": "npm",
+      "script": "test",
+      "path": "backend",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint",
+      "type": "npm",
+      "script": "lint",
+      "path": "backend",
+      "problemMatcher": ["$eslint-stylish"]
+    }
+  ]
+}

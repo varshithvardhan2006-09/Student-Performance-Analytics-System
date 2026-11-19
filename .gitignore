@@ -16,6 +16,13 @@ public/
 backend/.env
 backend/.env.local
 
+# --- editor: share the basic VS Code config, ignore personal files ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
 # --- logs & OS cruft ---
 *.log
 npm-debug.log*
