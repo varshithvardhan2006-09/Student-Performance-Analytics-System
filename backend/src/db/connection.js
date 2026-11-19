@@ -13,7 +13,7 @@ const net = require('net');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const { DEMO_TEACHER, MONGODB_DB, MONGODB_URI, MONGO_CLIENT_OPTIONS, USERS_COLLECTION } = require('../config/env');
+const { DEMO_TEACHER, IS_PRODUCTION, MONGODB_DB, MONGODB_URI, MONGO_CLIENT_OPTIONS, USERS_COLLECTION } = require('../config/env');
 const { escapeRegExp, normalizeEmail } = require('../utils/validators');
 const { normalizeRole } = require('../utils/normalizers');
 
@@ -308,7 +308,11 @@ async function initializeDatabase() {
     console.log(`[STARTUP] Normalised role casing on ${roleFix.modifiedCount} user document(s)`);
   }
 
-  await seedDemoUser();
+  // The demo teacher exists for local showcasing only; never create it (or
+  // reset its password) on a production database.
+  if (!IS_PRODUCTION) {
+    await seedDemoUser();
+  }
   return dbState.db;
 }
 

@@ -63,6 +63,11 @@ function getFileSignatureError(file) {
   return `${fileName} has an unsupported file extension.`;
 }
 
+/** True for a 24-character hex string, the only shape a Mongo ObjectId takes. */
+function isValidObjectId(value) {
+  return typeof value === 'string' && /^[0-9a-fA-F]{24}$/.test(value);
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -78,5 +83,6 @@ module.exports = {
   cleanHeaderLabel,
   getFileSignatureError,
   isPlainObject,
+  isValidObjectId,
   escapeCsvValue,
 };

@@ -28,7 +28,22 @@ import { handleUpload, updateSelectedFileLabel } from './src/pages/upload.js';
 import { resetStudentTableFilters } from './src/selectors.js';
 import { closeSidebar, handleSidebarClick, openSidebar, renderPage, renderSidebar, renderTeacherChip, setView } from './src/shell.js';
 import { state } from './src/state.js';
+// If the Chart.js CDN script did not load, flag it so the dashboard falls back
+// to its static tables instead of empty chart canvases.
+if (typeof window.Chart === 'undefined') {
+  window.SAPS_CHART_CDN_FAILED = true;
+}
+
+// The demo login hint only makes sense on a local development machine.
+function hideDemoNoteOutsideLocalhost() {
+  const host = window.location.hostname;
+  if (host !== 'localhost' && host !== '127.0.0.1') {
+    document.querySelector('.auth-demo-note')?.remove();
+  }
+}
+
 async function initializeApp() {
+  hideDemoNoteOutsideLocalhost();
   // Honour ?api=... once, so a deployed page can be pointed at a backend.
   persistApiBaseUrlOverride();
 

@@ -12,12 +12,13 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
-    <!-- If the CDN is blocked or offline, flag it so
-         the dashboard can fall back to its static tables instead of showing
-         empty chart canvases. -->
+    <!-- Chart.js is pinned and integrity-checked. If the CDN is blocked or
+         offline, script.js flags it and the dashboard falls back to its
+         static tables instead of showing empty chart canvases. -->
     <script
-      src="https://cdn.jsdelivr.net/npm/chart.js"
-      onerror="window.SAPS_CHART_CDN_FAILED = true;"
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+      integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC"
+      crossorigin="anonymous"
     ></script>
     <script src="site-config.js"></script>
   </head>
@@ -321,6 +322,11 @@
     <!-- script.js is an ES module entry point; all
          behaviour lives in frontend/src/. type="module" is also deferred,
          so the DOM is parsed before any module code runs. -->
+    <footer class="site-footer">
+      <a href="privacy.html">Privacy Policy</a>
+      <a href="terms.html">Terms of Use</a>
+    </footer>
+
     <script type="module" src="script.js"></script>
   </body>
 </html>

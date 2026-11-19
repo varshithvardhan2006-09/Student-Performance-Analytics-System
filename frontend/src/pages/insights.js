@@ -62,6 +62,31 @@ function buildFallbackInsights() {
   };
 }
 
+// Strengths and focus areas are worked out from this upload's own figures.
+function buildFocusTags(analytics, weakCount, topPerformers) {
+  const passPercentage = Number(analytics.passPercentage) || 0;
+  const averageMarks = Number(analytics.averageMarks) || 0;
+  const failed = Number(analytics.failedStudents) || 0;
+  const subjects = Array.isArray(analytics.subjectSummary)
+    ? [...analytics.subjectSummary].sort((a, b) => b.averageMarks - a.averageMarks)
+    : [];
+
+  const strengthTags = [];
+  if (passPercentage >= 70) strengthTags.push(`${formatPercent(passPercentage)} of students passed`);
+  if (topPerformers.length) strengthTags.push(`Top scorer: ${topPerformers[0].studentName}`);
+  if (subjects.length > 1) strengthTags.push(`Strongest subject: ${subjects[0].subjectName}`);
+  if (weakCount === 0) strengthTags.push('No students below 40%');
+  if (!strengthTags.length) strengthTags.push(`Class average is ${formatPercent(averageMarks)}`);
+
+  const improvementTags = [];
+  if (failed > 0) improvementTags.push(`${failed} student${failed === 1 ? '' : 's'} failed`);
+  if (weakCount > 0) improvementTags.push(`${weakCount} student${weakCount === 1 ? '' : 's'} below 40%`);
+  if (subjects.length > 1) improvementTags.push(`Weakest subject: ${subjects[subjects.length - 1].subjectName}`);
+  if (!improvementTags.length) improvementTags.push('No weak areas found in this upload');
+
+  return { strengthTags, improvementTags };
+}
+
 function renderInsightsPage() {
   const upload = getCurrentUpload();
   if (!upload || !state.analytics || !state.students.length) {
@@ -87,13 +112,14 @@ function renderInsightsPage() {
   const lowestMarks = Number(analytics.lowestMarks) || 0;
   const highestMarks = Number(analytics.highestMarks) || 0;
   const averageMarks = Number(analytics.averageMarks) || 0;
+  const { strengthTags, improvementTags } = buildFocusTags(analytics, weakCount, topPerformers);
 
   return `
     <section class="page">
       <div class="hero-card page-card">
         <div>
           <p class="eyebrow">AI Insights &amp; Report Generation</p>
-          <h1 class="page-title">Leverage AI to uncover trends and generate detailed reports.</h1>
+          <h1 class="page-title">Find trends in your class results and generate detailed reports.</h1>
           <p class="page-copy">Subject: ${escapeHtml(upload.subjectName)} | Class: ${escapeHtml(upload.className)}</p>
         </div>
         <div class="hero-actions">
@@ -161,7 +187,7 @@ function renderInsightsPage() {
       <div class="report-grid">
         <section class="insight-card large">
           <p class="eyebrow">Ask Doubts or Query</p>
-          <h3>Ask any question about your data and get instant AI-powered answers.</h3>
+          <h3>Ask any question about your data and get an instant answer.</h3>
           <form id="queryForm" class="ai-query">
             <input id="queryInput" type="text" placeholder="Which topics do students find most difficult?">
             <button class="primary-btn" type="button" data-query-submit>Generate Answer</button>
@@ -173,10 +199,7 @@ function renderInsightsPage() {
           <p class="eyebrow">Top Strengths</p>
           <h3>What is going well</h3>
           <div class="tag-list">
-            <span class="tag">Strong passes in the current upload</span>
-            <span class="tag">Top performers are clearly identified</span>
-            <span class="tag">Analytics are stored in MongoDB</span>
-            <span class="tag">Reports can be exported in multiple formats</span>
+            ${strengthTags.map((text) => `<span class="tag">${escapeHtml(text)}</span>`).join('')}
           </div>
         </section>
 
@@ -184,10 +207,7 @@ function renderInsightsPage() {
           <p class="eyebrow">Areas for Improvement</p>
           <h3>Where to focus next</h3>
           <div class="tag-list">
-            <span class="tag">Support weak students with revision sessions</span>
-            <span class="tag">Review low-scoring subjects after each upload</span>
-            <span class="tag">Track progress against previous uploads</span>
-            <span class="tag">Share actionable feedback with teachers</span>
+            ${improvementTags.map((text) => `<span class="tag">${escapeHtml(text)}</span>`).join('')}
           </div>
         </section>
 
@@ -220,7 +240,7 @@ function renderInsightsPage() {
           ${renderInsightSection('Top Performer Analysis', insights.topPerformerAnalysis || fallback.topPerformerAnalysis || '')}
         </div>
 
-        <div class="page-card" style="margin-top:1rem;background:linear-gradient(180deg,#f8fbff,#fff);">
+        <div class="page-card" style="margin-top:1rem;background:#f8fbff;">
           <p class="eyebrow">AI Disclaimer</p>
           <p class="page-copy">Insights are generated using the uploaded data. Please review the results alongside your own teaching expertise before making decisions.</p>
         </div>

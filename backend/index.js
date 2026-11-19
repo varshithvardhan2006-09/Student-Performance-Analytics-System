@@ -19,7 +19,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Requiring the config module loads .env and validates the runtime config.
-const { PORT, MONGODB_DB, GROQ_API_KEY, JSON_LIMIT } = require('./src/config/env');
+const { PORT, MONGODB_DB, GROQ_API_KEY, JSON_LIMIT, TRUST_PROXY } = require('./src/config/env');
 const { dbState, ensureDatabaseReady, ensurePortAvailable, isHttpServerAlreadyRunning } = require('./src/db/connection');
 const { securityHeaders } = require('./src/middleware/security');
 const { corsMiddleware } = require('./src/middleware/cors');
@@ -38,6 +38,10 @@ const uploadsRoutes = require('./src/routes/uploads');
 // ============================================================================
 const app = express();
 app.disable('x-powered-by');
+if (TRUST_PROXY) {
+  // A bare number means "this many proxy hops"; anything else is passed through.
+  app.set('trust proxy', /^\d+$/.test(TRUST_PROXY) ? Number(TRUST_PROXY) : TRUST_PROXY);
+}
 app.use(express.json({ limit: JSON_LIMIT }));
 app.use(express.urlencoded({ extended: true, limit: JSON_LIMIT }));
 

@@ -12,7 +12,7 @@ const { answerQuestionFromData } = require('./queryEngine');
 /**
  * Generate fallback AI insights when no API key is available
  */
-function generateFallbackInsights(analytics, subjectName) {
+function generateFallbackInsights(analytics, subjectName, weakCount) {
   const {
     totalStudents, passedStudents, failedStudents,
     averageMarks, highestMarks, lowestMarks,
@@ -53,8 +53,10 @@ function generateFallbackInsights(analytics, subjectName) {
   }
 
   // Weak Student Analysis
-  const weakStudents = marksDistribution.range_0_35;
-  let weakStudentAnalysis = `${weakStudents} students (${((weakStudents / totalStudents) * 100).toFixed(1)}%) scored 35% or below, placing them in the weak category. `;
+  // The caller passes the exact count below the weak threshold; the 0-35% band
+  // is only a fallback when it is not supplied.
+  const weakStudents = Number.isFinite(weakCount) ? weakCount : marksDistribution.range_0_35;
+  let weakStudentAnalysis = `${weakStudents} students (${((weakStudents / totalStudents) * 100).toFixed(1)}%) scored below 40%, placing them in the weak category. `;
   if (weakStudents === 0) {
     weakStudentAnalysis += 'The absence of very weak students is a positive indicator. Continue with the current support mechanisms.';
   } else if (weakStudents <= totalStudents * 0.2) {
@@ -132,7 +134,7 @@ function buildQueryFacts(analytics, students, subjectName) {
     .filter((student) => String(student.status).toLowerCase() === 'fail')
     .slice(0, 5);
   const weakStudents = sortedStudents
-    .filter((student) => student.percentage < 40 || String(student.status).toLowerCase() === 'fail')
+    .filter((student) => student.percentage < 40)
     .slice(0, 5);
 
   return {

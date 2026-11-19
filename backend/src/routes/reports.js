@@ -13,14 +13,29 @@ const xlsx = require('xlsx');
 const { dbState } = require('../db/connection');
 const { authMiddleware } = require('../middleware/auth');
 const { extractSubjectMarks, getSubjectNamesFromStudents, normalizeReportType } = require('../utils/normalizers');
-const { escapeCsvValue } = require('../utils/validators');
+const { escapeCsvValue, isValidObjectId } = require('../utils/validators');
 
 const router = express.Router();
+
+// Record the download before streaming it, so a dropped connection cannot
+// leave a delivered report with no history entry.
+async function logReport(uploadId, userId, reportType, fileName) {
+  await dbState.reportsCol.insertOne({
+    uploadId,
+    reportType,
+    fileName,
+    userId,
+    generatedAt: new Date()
+  });
+}
 // GET /api/reports/:uploadId/pdf
 router.get('/api/reports/:uploadId/pdf', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
 
     // Fetch data
     const uploadDoc = await dbState.uploadsCol.findOne({ _id: new ObjectId(uploadId), userId });
@@ -37,6 +52,8 @@ router.get('/api/reports/:uploadId/pdf', authMiddleware, async (req, res) => {
       .find({ uploadId, userId })
       .sort({ rank: 1 })
       .toArray();
+
+    await logReport(uploadId, userId, 'pdf', 'report.pdf');
 
     // Create PDF
     const doc = new PDFDocument({ margin: 40, size: 'A4' });
@@ -179,15 +196,6 @@ router.get('/api/reports/:uploadId/pdf', authMiddleware, async (req, res) => {
     doc.text(`Report generated on: ${new Date().toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, { align: 'center' });
 
     doc.end();
-
-    // Save report record
-    await dbState.reportsCol.insertOne({
-      uploadId,
-      reportType: 'pdf',
-      fileName: 'report.pdf',
-      userId,
-      generatedAt: new Date()
-    });
   } catch (err) {
     console.error('[PDF REPORT ERROR]', err);
     if (!res.headersSent) {
@@ -201,6 +209,9 @@ router.get('/api/reports/:uploadId/excel', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
 
     // Fetch data
     const uploadDoc = await dbState.uploadsCol.findOne({ _id: new ObjectId(uploadId), userId });
@@ -302,20 +313,13 @@ router.get('/api/reports/:uploadId/excel', authMiddleware, async (req, res) => {
     xlsx.utils.book_append_sheet(workbook, studentSheet, 'Student Data');
 
     // Generate buffer and send
+    await logReport(uploadId, userId, 'excel', 'report.xlsx');
+
     const excelBuffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename=report.xlsx');
     res.send(Buffer.from(excelBuffer));
-
-    // Save report record
-    await dbState.reportsCol.insertOne({
-      uploadId,
-      reportType: 'excel',
-      fileName: 'report.xlsx',
-      userId,
-      generatedAt: new Date()
-    });
   } catch (err) {
     console.error('[EXCEL REPORT ERROR]', err);
     if (!res.headersSent) {
@@ -329,6 +333,9 @@ router.get('/api/reports/:uploadId/csv', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
 
     // Fetch data
     const uploadDoc = await dbState.uploadsCol.findOne({ _id: new ObjectId(uploadId), userId });
@@ -376,20 +383,13 @@ router.get('/api/reports/:uploadId/csv', authMiddleware, async (req, res) => {
       csvRows.push(row.map(escapeCsvValue).join(','));
     }
 
+    await logReport(uploadId, userId, 'csv', 'report.csv');
+
     const csvContent = csvRows.join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=report.csv');
     res.send(csvContent);
-
-    // Save report record
-    await dbState.reportsCol.insertOne({
-      uploadId,
-      reportType: 'csv',
-      fileName: 'report.csv',
-      userId,
-      generatedAt: new Date()
-    });
   } catch (err) {
     console.error('[CSV REPORT ERROR]', err);
     if (!res.headersSent) {

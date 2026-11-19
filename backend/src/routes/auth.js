@@ -10,7 +10,7 @@ const { ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-const { DEMO_TEACHER, JWT_SECRET } = require('../config/env');
+const { JWT_SECRET } = require('../config/env');
 const { dbState } = require('../db/connection');
 const { authMiddleware } = require('../middleware/auth');
 const { authRateLimiter } = require('../middleware/rateLimiter');
@@ -22,9 +22,12 @@ router.post('/api/signup', authRateLimiter, async (req, res) => {
   try {
     const { fullName, email, password, confirmPassword } = req.body;
 
-    // Validate required fields
+    // Validate required fields (and that they are plain strings, not objects)
     if (!fullName || !email || !password || !confirmPassword) {
       return res.status(400).json({ success: false, message: 'All fields are required.' });
+    }
+    if (![fullName, email, password, confirmPassword].every((value) => typeof value === 'string')) {
+      return res.status(400).json({ success: false, message: 'All fields must be text.' });
     }
 
     // Validate email format
@@ -33,8 +36,13 @@ router.post('/api/signup', authRateLimiter, async (req, res) => {
     }
 
     // Validate password length
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
+    if (password.length < 8) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters long.' });
+    }
+
+    // bcrypt only uses the first 72 bytes, so refuse longer passwords outright.
+    if (Buffer.byteLength(password, 'utf8') > 72) {
+      return res.status(400).json({ success: false, message: 'Password must be at most 72 bytes long.' });
     }
 
     // Validate passwords match
@@ -82,6 +90,9 @@ router.post('/api/login', authRateLimiter, async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ success: false, message: 'Email and password are required.' });
     }
+    if (typeof email !== 'string' || typeof password !== 'string') {
+      return res.status(400).json({ success: false, message: 'Email and password must be text.' });
+    }
 
     // Find user
     const emailKey = normalizeEmail(email);
@@ -97,24 +108,8 @@ router.post('/api/login', authRateLimiter, async (req, res) => {
 
     // Compare password
     const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    const isDemoTeacher = normalizeEmail(email) === normalizeEmail(DEMO_TEACHER.email);
-    const isLegacyDemoPassword = isDemoTeacher && (password === 'Demo@123' || password === 'Demo@1234');
-
-    if (!isPasswordValid && !isLegacyDemoPassword) {
+    if (!isPasswordValid) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
-    }
-
-    if (isLegacyDemoPassword && (!isPasswordValid || user.emailKey !== emailKey)) {
-      await dbState.usersCol.updateOne(
-        { _id: user._id },
-        {
-          $set: {
-            emailKey,
-            passwordHash: await bcrypt.hash(DEMO_TEACHER.password, 12),
-            updatedAt: new Date(),
-          },
-        }
-      );
     }
 
     // Generate JWT

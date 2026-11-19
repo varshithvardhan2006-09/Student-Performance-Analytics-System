@@ -7,6 +7,7 @@ const express = require('express');
 
 const { dbState } = require('../db/connection');
 const { authMiddleware } = require('../middleware/auth');
+const { escapeRegExp, isValidObjectId } = require('../utils/validators');
 
 const router = express.Router();
 // GET /api/students/:uploadId
@@ -14,6 +15,9 @@ router.get('/api/students/:uploadId', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
     const { search, status, category, page = 1, limit = 50 } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
@@ -32,7 +36,8 @@ router.get('/api/students/:uploadId', authMiddleware, async (req, res) => {
     }
 
     if (search) {
-      const searchRegex = new RegExp(search, 'i');
+      // Treat the search box as plain text, never as a regex pattern.
+      const searchRegex = new RegExp(escapeRegExp(String(search).slice(0, 100)), 'i');
       filter.$or = [
         { rollNo: searchRegex },
         { studentName: searchRegex }

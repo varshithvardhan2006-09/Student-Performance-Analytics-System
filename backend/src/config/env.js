@@ -59,7 +59,13 @@ const USERS_COLLECTION = process.env.MONGODB_USERS_COLLECTION || 'users';
 
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-const JWT_SECRET = process.env.JWT_SECRET || (IS_PRODUCTION ? '' : 'local-development-only-saps-jwt-secret-change-before-deploy');
+// Outside production a random per-process secret is used when none is set, so
+// there is no well-known fallback key. Tokens simply stop working on restart.
+const JWT_SECRET = process.env.JWT_SECRET || (IS_PRODUCTION ? '' : require('crypto').randomBytes(48).toString('hex'));
+
+// Set TRUST_PROXY (e.g. "1") only when the app sits behind a reverse proxy, so
+// that req.ip uses the proxy's forwarded address. Otherwise the header is ignored.
+const TRUST_PROXY = process.env.TRUST_PROXY || '';
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
@@ -93,7 +99,10 @@ const DEMO_TEACHER = {
 };
 
 function validateRuntimeConfig() {
-  const weakSecrets = new Set(['default_jwt_secret_change_me', 'change_me', 'secret', 'jwt_secret']);
+  const weakSecrets = new Set([
+    'default_jwt_secret_change_me', 'change_me', 'secret', 'jwt_secret',
+    'replace_with_64_plus_char_random_hex_string',
+  ]);
   if (!JWT_SECRET || JWT_SECRET.length < 32 || weakSecrets.has(JWT_SECRET)) {
     const message = 'JWT_SECRET must be set to a strong value with at least 32 characters.';
     if (IS_PRODUCTION) {
@@ -111,6 +120,8 @@ module.exports = {
   MONGODB_DB,
   USERS_COLLECTION,
   JWT_SECRET,
+  IS_PRODUCTION,
+  TRUST_PROXY,
   GROQ_API_KEY,
   JSON_LIMIT,
   MONGO_CLIENT_OPTIONS,

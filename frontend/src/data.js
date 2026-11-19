@@ -11,19 +11,41 @@ import { getDashboardAnalytics, getDashboardStudents, getSubjectFilterOptions } 
 import { renderPage } from './shell.js';
 import { state } from './state.js';
 import { delay } from './utils/format.js';
+// The API returns students in pages (1000 at most), so keep asking until every
+// page is in -- a large class must not be silently cut short.
+async function fetchAllStudents(uploadId) {
+  const pageSize = 1000;
+  const students = [];
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+    const response = await requestJson(
+      `/api/students/${encodeURIComponent(uploadId)}?limit=${pageSize}&page=${page}`
+    );
+    if (Array.isArray(response.students)) {
+      students.push(...response.students);
+    }
+    totalPages = Number(response.totalPages) || 1;
+    page += 1;
+  }
+
+  return students;
+}
+
 async function loadUploadData(uploadId) {
   if (!uploadId) {
     return null;
   }
 
-  const [uploadResponse, studentsResponse] = await Promise.all([
+  const [uploadResponse, loadedStudents] = await Promise.all([
     requestJson(`/api/uploads/${encodeURIComponent(uploadId)}`),
-    requestJson(`/api/students/${encodeURIComponent(uploadId)}?limit=500`),
+    fetchAllStudents(uploadId),
   ]);
 
   state.currentUpload = uploadResponse.upload;
   state.analytics = uploadResponse.analytics;
-  state.students = Array.isArray(studentsResponse.students) ? studentsResponse.students : [];
+  state.students = loadedStudents;
   state.sourceAnalytics = state.analytics;
   state.sourceStudents = state.students;
   state.dashboardAnalytics = state.analytics;

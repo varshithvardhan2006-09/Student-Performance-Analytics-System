@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Privacy Policy - Student Performance Analytics System</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="policy-page">
+      <h1>Privacy Policy</h1>
+      <p>This is a student project. This page explains what the application stores and why.</p>
+
+      <h2>What is stored</h2>
+      <ul>
+        <li>Teacher account details: full name, email address and a bcrypt hash of the password. The password itself is never stored.</li>
+        <li>The marks data a teacher uploads: roll numbers, student names, marks and the analytics calculated from them.</li>
+        <li>A record of which reports were downloaded and when.</li>
+      </ul>
+
+      <h2>Uploaded files</h2>
+      <p>Uploaded files are read in memory and are not saved to disk. Only the extracted records and results are stored in the database.</p>
+
+      <h2>AI features</h2>
+      <p>If the server has a Groq API key configured, summaries of class statistics, a student's question, or the text of an uploaded PDF may be sent to Groq to produce insights. Without a key, nothing is sent anywhere and local summaries are used.</p>
+
+      <h2>Who can see the data</h2>
+      <p>Each teacher can only see their own uploads. Data is not sold or shared. Cookies are not used; the login token is kept in your browser's session storage and the optional "remember me" email in local storage.</p>
+
+      <h2>Deleting data</h2>
+      <p>Deleting an upload from the History page removes its students, analytics, insights and report records. To delete your account, contact the person running this installation.</p>
+
+      <p><a href="/">Back to the app</a></p>
+    </main>
+  </body>
+</html>

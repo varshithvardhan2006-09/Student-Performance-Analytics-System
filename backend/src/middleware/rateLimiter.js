@@ -4,10 +4,10 @@
 // server; a shared store such as Redis would be needed to run several.
 // ============================================================================
 
+// req.ip honours the X-Forwarded-For header only when Express' "trust proxy"
+// setting is on (see TRUST_PROXY), so a client cannot pick its own address.
 function getClientIp(req) {
-  return String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || 'unknown')
-    .split(',')[0]
-    .trim();
+  return String(req.ip || req.socket?.remoteAddress || 'unknown');
 }
 
 function createRateLimiter({ windowMs, max, message }) {
@@ -24,6 +24,13 @@ function createRateLimiter({ windowMs, max, message }) {
 
     bucket.count += 1;
     buckets.set(key, bucket);
+
+    // Drop expired buckets now and then so the map cannot grow without bound.
+    if (buckets.size > 5000) {
+      for (const [bucketKey, entry] of buckets) {
+        if (entry.resetAt <= now) buckets.delete(bucketKey);
+      }
+    }
 
     if (bucket.count > max) {
       res.setHeader('Retry-After', Math.ceil((bucket.resetAt - now) / 1000));
@@ -47,6 +54,7 @@ const uploadRateLimiter = createRateLimiter({
 });
 
 module.exports = {
+  createRateLimiter,
   authRateLimiter,
   uploadRateLimiter,
 };

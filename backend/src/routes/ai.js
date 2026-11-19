@@ -12,13 +12,27 @@ const { ObjectId } = require('mongodb');
 const { GROQ_API_KEY } = require('../config/env');
 const { dbState } = require('../db/connection');
 const { authMiddleware } = require('../middleware/auth');
-const { generateFallbackInsights, generateQuestionAnswer, parseAIResponse } = require('../services/aiService');
+const { generateFallbackInsights, generateQuestionAnswer, parseAIResponse } = require('../services/aiService');const { isValidObjectId } = require('../utils/validators');
+
+const { WEAK_THRESHOLD_PERCENT } = require('../services/analytics');
+
 const router = express.Router();
+
+function countWeakStudents(uploadId, userId) {
+  return dbState.studentsCol.countDocuments({
+    uploadId,
+    userId,
+    percentage: { $lt: WEAK_THRESHOLD_PERCENT },
+  });
+}
 // POST /api/ai-insights/:uploadId
 router.post('/api/ai-insights/:uploadId', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
 
     // Fetch analytics
     const analytics = await dbState.analyticsCol.findOne({ uploadId, userId });
@@ -40,7 +54,11 @@ router.post('/api/ai-insights/:uploadId', authMiddleware, async (req, res) => {
       try {
         const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-        const weakStudentCount = analytics.marksDistribution.range_0_35;
+        const weakStudentCount = await dbState.studentsCol.countDocuments({
+          uploadId,
+          userId,
+          percentage: { $lt: WEAK_THRESHOLD_PERCENT },
+        });
 
         const userPrompt = `Analyze the following student performance data for ${subjectName}:
 
@@ -52,7 +70,7 @@ router.post('/api/ai-insights/:uploadId', authMiddleware, async (req, res) => {
 - Lowest Marks: ${analytics.lowestMarks}
 - Pass Percentage: ${analytics.passPercentage}%
 - Fail Percentage: ${analytics.failPercentage}%
-- Weak Students (scoring below 35%): ${weakStudentCount}
+- Weak Students (scoring below ${WEAK_THRESHOLD_PERCENT}%): ${weakStudentCount}
 
 Please provide:
 1) Overall Performance Summary (2-3 sentences)
@@ -82,11 +100,11 @@ Please provide:
       } catch (aiErr) {
         console.error('[GROQ AI ERROR]', aiErr);
         // Fallback to rule-based insights on AI error
-        insights = generateFallbackInsights(analytics, subjectName);
+        insights = generateFallbackInsights(analytics, subjectName, await countWeakStudents(uploadId, userId));
       }
     } else {
       // No API key - use fallback
-      insights = generateFallbackInsights(analytics, subjectName);
+      insights = generateFallbackInsights(analytics, subjectName, await countWeakStudents(uploadId, userId));
     }
 
     // Store insights in DB (upsert)
@@ -120,6 +138,9 @@ router.post('/api/ai-query/:uploadId', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
     const question = String(req.body?.question || '').trim();
 
     if (!question) {
@@ -165,6 +186,9 @@ router.get('/api/ai-insights/:uploadId', authMiddleware, async (req, res) => {
   try {
     const { uploadId } = req.params;
     const userId = req.userId.toString();
+    if (!isValidObjectId(uploadId)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload ID.' });
+    }
 
     const insightDoc = await dbState.aiInsightsCol.findOne({ uploadId, userId });
     if (!insightDoc) {

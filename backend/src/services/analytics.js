@@ -6,6 +6,10 @@
 
 const { extractSubjectMarks, getSubjectNamesFromStudents, normalizeReportType } = require('../utils/normalizers');
 const { isPlainObject } = require('../utils/validators');
+// A student scoring below this percentage is in the weak band. The dashboard,
+// the query engine and the AI insights all use this one value.
+const WEAK_THRESHOLD_PERCENT = 40;
+
 function buildStudentPerformance(student, marks, maxMarks, passingMarks, rank = student.rank || 0) {
   const { marks: safeMarks, percentage, status, category } = classifyPerformance(marks, maxMarks, passingMarks);
 
@@ -175,7 +179,7 @@ function classifyPerformance(marks, maxMarks, passingMarks) {
     category = 'Failed';
   } else if (percentage > 80) {
     category = 'Top Performer';
-  } else if (percentage < 40) {
+  } else if (percentage < WEAK_THRESHOLD_PERCENT) {
     category = 'Weak Student';
   } else {
     category = 'Average Performer';
@@ -327,6 +331,7 @@ function calculateAnalytics(students, maxMarks, reportType = 'single') {
 }
 
 module.exports = {
+  WEAK_THRESHOLD_PERCENT,
   classifyPerformance,
   calculateAnalyticsForSubset,
   buildFilteredDashboardData,

@@ -2398,3 +2398,25 @@ a {
     font-size: 0.8rem;
   }
 }
+
+/* Links to the policy pages, shown at the bottom of every screen. */
+.site-footer {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 16px;
+  font-size: 13px;
+}
+.site-footer a {
+  color: #475569;
+}
+.site-footer a:hover {
+  color: #1d4ed8;
+}
+
+.policy-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 16px;
+  line-height: 1.6;
+}

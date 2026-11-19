@@ -20,6 +20,25 @@ const { detectRecordsReportType, normalizeReportType } = require('../utils/norma
 const { getFileSignatureError } = require('../utils/validators');
 
 const router = express.Router();
+
+// Undo a partly saved upload. Failures here are logged, not rethrown, so the
+// original error is the one reported to the client.
+async function rollbackUpload({ subjectId, uploadId, uploadObjectId }) {
+  try {
+    if (uploadId) {
+      await Promise.all([
+        dbState.studentsCol.deleteMany({ uploadId }),
+        dbState.analyticsCol.deleteMany({ uploadId }),
+        dbState.uploadsCol.deleteOne({ _id: uploadObjectId }),
+      ]);
+    }
+    if (subjectId) {
+      await dbState.subjectsCol.deleteOne({ _id: subjectId });
+    }
+  } catch (cleanupErr) {
+    console.error('[UPLOAD ROLLBACK ERROR]', cleanupErr.message);
+  }
+}
 // POST /api/upload
 router.post('/api/upload', authMiddleware, uploadRateLimiter, upload.array('file'), async (req, res) => {
   try {
@@ -135,68 +154,26 @@ router.post('/api/upload', authMiddleware, uploadRateLimiter, upload.array('file
     const fileNames = uploadedFiles.map((file) => file.originalname);
     const totalFileSize = uploadedFiles.reduce((sum, file) => sum + (file.size || 0), 0);
 
-    // Insert subject
-    const subjectResult = await dbState.subjectsCol.insertOne({
-      name: subjectName.trim(),
-      className: className.trim(),
-      maxMarks: maxMarksNum,
-      passingMarks: passingMarksNum,
-      subjectType: reportType,
-      userId,
-      createdAt: now
-    });
-    const subjectId = subjectResult.insertedId.toString();
+    // MongoDB (standalone) has no multi-document transaction, so remember what
+    // was written and delete it again if a later insert fails.
+    const written = {};
+    try {
+      // Insert subject
+      const subjectResult = await dbState.subjectsCol.insertOne({
+        name: subjectName.trim(),
+        className: className.trim(),
+        maxMarks: maxMarksNum,
+        passingMarks: passingMarksNum,
+        subjectType: reportType,
+        userId,
+        createdAt: now
+      });
+      const subjectId = subjectResult.insertedId.toString();
+      written.subjectId = subjectResult.insertedId;
 
-    // Insert upload
-    const uploadResult = await dbState.uploadsCol.insertOne({
-      subjectId,
-      subjectName: subjectName.trim(),
-      className: className.trim(),
-      maxMarks: maxMarksNum,
-      passingMarks: passingMarksNum,
-      subjectType: reportType,
-      fileName: fileNames[0],
-      fileNames,
-      fileCount: fileNames.length,
-      originalName: fileNames[0],
-      fileSize: totalFileSize,
-      studentCount: students.length,
-      userId,
-      uploadDate: now,
-      status: 'completed'
-    });
-    const uploadId = uploadResult.insertedId.toString();
-
-    // Insert students
-    const studentDocs = students.map(student => ({
-      uploadId,
-      rollNo: student.rollNo,
-      studentName: student.studentName,
-      marks: student.marks,
-      percentage: student.percentage,
-      status: student.status,
-      category: student.category,
-      rank: student.rank,
-      subjectMarks: student.subjectMarks || null,
-      subjectType: reportType,
-      userId
-    }));
-    await dbState.studentsCol.insertMany(studentDocs);
-
-    // Insert analytics
-    await dbState.analyticsCol.insertOne({
-      uploadId,
-      ...analyticsData,
-      userId,
-      calculatedAt: now
-    });
-
-    // Step 7: Return response
-    res.status(201).json({
-      success: true,
-      uploadId,
-      upload: {
-        _id: uploadId,
+      // Insert upload
+      const uploadResult = await dbState.uploadsCol.insertOne({
+        subjectId,
         subjectName: subjectName.trim(),
         className: className.trim(),
         maxMarks: maxMarksNum,
@@ -205,16 +182,70 @@ router.post('/api/upload', authMiddleware, uploadRateLimiter, upload.array('file
         fileName: fileNames[0],
         fileNames,
         fileCount: fileNames.length,
+        originalName: fileNames[0],
+        fileSize: totalFileSize,
         studentCount: students.length,
+        userId,
         uploadDate: now,
-        status: 'completed',
-      },
-      analytics: analyticsData,
-      studentCount: students.length,
-      fileCount: fileNames.length,
-      subjectType: reportType,
-      message: 'File processed successfully'
-    });
+        status: 'completed'
+      });
+      const uploadId = uploadResult.insertedId.toString();
+      written.uploadId = uploadId;
+      written.uploadObjectId = uploadResult.insertedId;
+
+      // Insert students
+      const studentDocs = students.map(student => ({
+        uploadId,
+        rollNo: student.rollNo,
+        studentName: student.studentName,
+        marks: student.marks,
+        percentage: student.percentage,
+        status: student.status,
+        category: student.category,
+        rank: student.rank,
+        subjectMarks: student.subjectMarks || null,
+        subjectType: reportType,
+        userId
+      }));
+      await dbState.studentsCol.insertMany(studentDocs);
+
+      // Insert analytics
+      await dbState.analyticsCol.insertOne({
+        uploadId,
+        ...analyticsData,
+        userId,
+        calculatedAt: now
+      });
+
+      // Step 7: Return response
+      return res.status(201).json({
+        success: true,
+        uploadId,
+        upload: {
+          _id: uploadId,
+          subjectName: subjectName.trim(),
+          className: className.trim(),
+          maxMarks: maxMarksNum,
+          passingMarks: passingMarksNum,
+          subjectType: reportType,
+          fileName: fileNames[0],
+          fileNames,
+          fileCount: fileNames.length,
+          studentCount: students.length,
+          uploadDate: now,
+          status: 'completed',
+        },
+        analytics: analyticsData,
+        studentCount: students.length,
+        fileCount: fileNames.length,
+        subjectType: reportType,
+        message: 'File processed successfully'
+      });
+    } catch (saveErr) {
+      await rollbackUpload(written);
+      throw saveErr;
+    }
+
   } catch (err) {
     console.error('[UPLOAD ERROR]', err);
     res.status(500).json({ success: false, message: 'An error occurred while processing the file.' });
