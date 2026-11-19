@@ -248,18 +248,16 @@ async function ensureInsights(force = false) {
     return state.insights;
   }
 
-  try {
-    const existing = await requestJson(`/api/ai-insights/${encodeURIComponent(uploadId)}`);
-    state.insights = existing.insights || null;
-  } catch (error) {
-    // Key this on the HTTP status, not on the wording of the error message:
-    // 404 means no insights have been generated for this upload yet, so
-    // generate them now instead of surfacing an error on first visit.
-    if (force || error.status === 404) {
-      const generated = await requestJson(`/api/ai-insights/${encodeURIComponent(uploadId)}`, { method: 'POST' });
-      state.insights = generated.insights || null;
-    } else {
-      throw error;
+  const url = `/api/ai-insights/${encodeURIComponent(uploadId)}`;
+
+  // "Generate Insights" always creates a fresh set. Otherwise reuse the saved
+  // insights, and only generate them when none exist for this upload yet.
+  if (force) {
+    state.insights = (await requestJson(url, { method: 'POST' })).insights || null;
+  } else {
+    state.insights = (await requestJson(url)).insights || null;
+    if (!state.insights) {
+      state.insights = (await requestJson(url, { method: 'POST' })).insights || null;
     }
   }
 
@@ -379,7 +377,5 @@ async function submitQueryForm(form) {
 export {
   renderInsightsPage,
   ensureInsights,
-  getInsightAnswer,
-  getGroqAnswer,
   submitQueryForm,
 };

@@ -192,7 +192,7 @@ router.get('/api/ai-insights/:uploadId', authMiddleware, async (req, res) => {
 
     const insightDoc = await dbState.aiInsightsCol.findOne({ uploadId, userId });
     if (!insightDoc) {
-      return res.status(404).json({ success: false, message: 'No AI insights found for this upload. Generate insights first.' });
+      return res.json({ success: true, insights: null, generatedAt: null });
     }
 
     res.json({

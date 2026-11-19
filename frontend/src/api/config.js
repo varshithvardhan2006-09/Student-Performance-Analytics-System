@@ -75,6 +75,5 @@ function setApiBaseUrl(apiBaseUrl) {
 export {
   getApiBaseUrl,
   resolveApiUrl,
-  setApiBaseUrl,
   persistApiBaseUrlOverride,
 };
