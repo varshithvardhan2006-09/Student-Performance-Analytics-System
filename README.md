@@ -130,7 +130,9 @@ The current project is a local full-stack setup: the Express backend serves both
 ## Project Structure
 
 ```
-Student Analytics Performance System/
+Student-Performance-Analytics-System/
+├── .github/workflows/ci.yml            runs lint and tests on every push
+├── .vscode/                             shared editor, debug and task settings
 ├── backend/
 │   ├── index.js                         Express startup, middleware, routes, static frontend serving
 │   ├── package.json                     backend scripts and dependencies
@@ -149,6 +151,7 @@ Student Analytics Performance System/
 │   ├── style.css                        UI styling
 │   ├── script.js                        frontend entry point
 │   ├── site-config.js                   optional API base URL override
+│   ├── privacy.html, terms.html         policy pages linked from the footer
 │   ├── intro.jpeg                       login page background image
 │   └── src/
 │       ├── api/                         API config and request client
@@ -187,7 +190,7 @@ Ignored runtime folders/files such as `backend/.env`, `backend/node_modules/`, `
 
 ```bash
 git clone https://github.com/varshithvardhan2006-09/Student-Performance-Analytics-System.git
-cd "Student Analytics Performance System/backend"
+cd Student-Performance-Analytics-System/backend
 npm install
 ```
 
@@ -237,7 +240,8 @@ http://localhost:3000
 | `ALLOWED_ORIGINS` | Production | Comma-separated allowed browser origins |
 | `FRONTEND_URL` | No | Additional frontend origin for CORS |
 | `JSON_LIMIT` | No | Maximum JSON request body size |
-| `DEMO_TEACHER_*` | No | Optional seeded teacher values for local demos |
+| `TRUST_PROXY` | No | Number of reverse proxies in front of the app (so rate limiting sees real client IPs) |
+| `DEMO_TEACHER_*` | No | Optional seeded teacher values for local demos (never created in production) |
 
 Never commit `backend/.env` or real API keys.
 
@@ -401,3 +405,5 @@ Mermaid source files are available beside the exported diagrams.
 This project is licensed under the MIT License.
 
 © 2026 Varshith Vardhan Chiluveru
+
+Maintained by [varshithvardhan2006-09](https://github.com/varshithvardhan2006-09).

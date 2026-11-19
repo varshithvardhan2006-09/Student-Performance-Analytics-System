@@ -3,6 +3,13 @@
   "version": "2.0.1",
   "description": "Student Performance Analytics System - Backend API Server (modular: config/db/middleware/services/routes)",
   "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/varshithvardhan2006-09/Student-Performance-Analytics-System.git"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
